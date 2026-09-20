@@ -1215,8 +1215,9 @@ async def test_search_foods_returns_results(app_with_nutrition, mock_garmin_clie
             "searchExpression": "Cheerios & Oats/é",
             "start": 0,
             "limit": 20,
+            "regionCode": nutrition.FOOD_REGION,
+            "languageCode": nutrition.FOOD_LANGUAGE,
         },
-        headers={"Accept-Language": nutrition.FOOD_ACCEPT_LANGUAGE},
     )
 
 

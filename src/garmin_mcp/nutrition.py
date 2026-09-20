@@ -21,14 +21,8 @@ def _food_region(env=os.environ) -> str:
     return (env.get("GARMIN_FOOD_REGION") or "").strip().upper() or "GB"
 
 
-def _accept_language(region: str) -> str:
-    return f"en-{region},en;q=0.9"
-
-
 FOOD_REGION = _food_region()
-# garminconnect sends "Accept-Language: en-US" on every API call. The food
-# catalogue is region-aware, so the search asks for FOOD_REGION's English instead.
-FOOD_ACCEPT_LANGUAGE = _accept_language(FOOD_REGION)
+FOOD_LANGUAGE = "en"
 
 
 def _num_to_str(value: float) -> str:
@@ -272,11 +266,21 @@ def register_tools(app):
             limit: Maximum number of results per page (default 20)
         """
         try:
-            data = garmin_client.connectapi(
-                "/nutrition-service/food/search",
-                params={"searchExpression": query, "start": start, "limit": limit},
-                headers={"Accept-Language": FOOD_ACCEPT_LANGUAGE},
-            )
+            params = {"searchExpression": query, "start": start, "limit": limit}
+            # Without a region Garmin searches the US catalogue. Garmin Connect web
+            # sends these two alongside the paging parameters (captured 2026-09-20).
+            catalogue_region = FOOD_REGION
+            try:
+                data = garmin_client.connectapi(
+                    "/nutrition-service/food/search",
+                    params={**params, "regionCode": FOOD_REGION, "languageCode": FOOD_LANGUAGE},
+                )
+            except GarminConnectConnectionError as e:
+                if "API Error 400" not in str(e):
+                    raise
+                # Region parameters rejected: keep search working, region-less.
+                catalogue_region = None
+                data = garmin_client.connectapi("/nutrition-service/food/search", params=params)
             if not data:
                 return "No foods found."
 
@@ -317,6 +321,7 @@ def register_tools(app):
             return json.dumps({
                 "count": len(results),
                 "has_more": has_more,
+                "catalogue_region": catalogue_region,
                 "results": results,
             }, indent=2)
         except Exception as e:

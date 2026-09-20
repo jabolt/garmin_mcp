@@ -1,12 +1,18 @@
 """
 Food-region handling for the nutrition tools (self-hosted fork).
 
-Upstream hard-codes the US food region in every custom-food payload and lets
-garminconnect's default "Accept-Language: en-US" ride along on the catalogue
-search. This fork reads the region from GARMIN_FOOD_REGION (default GB), uses it
-in all five payload sites, and asks the food search for the matching language.
+Upstream hard-codes the US food region in every custom-food payload and sends the
+catalogue search no region at all, so searches come back from the US catalogue.
+This fork reads the region from GARMIN_FOOD_REGION (default GB), uses it in all
+five payload sites, and sends regionCode/languageCode on the food search — the
+parameters Garmin Connect web sends (captured 2026-09-20):
+
+    /nutrition-service/food/search?searchExpression=gregg&start=0&limit=50&regionCode=GB&languageCode=en
 """
+import json
+
 import pytest
+from garminconnect import GarminConnectConnectionError, GarminConnectTooManyRequestsError
 from mcp.server.fastmcp import FastMCP
 
 from garmin_mcp import nutrition
@@ -53,11 +59,6 @@ def test_food_region_reads_env_and_normalises():
 
 def test_food_region_blank_falls_back_to_default():
     assert nutrition._food_region({"GARMIN_FOOD_REGION": "  "}) == "GB"
-
-
-def test_accept_language_follows_region():
-    assert nutrition._accept_language("GB") == "en-GB,en;q=0.9"
-    assert nutrition.FOOD_ACCEPT_LANGUAGE == "en-GB,en;q=0.9"
 
 
 # --- the five payload sites follow the constant, not a literal -----------------
@@ -130,22 +131,91 @@ def test_no_hard_coded_us_region_left_in_module():
     assert '"regionCode": "US"' not in inspect.getsource(nutrition)
 
 
-# --- catalogue search asks for the configured language ------------------------
+# --- catalogue search sends the region, as Garmin Connect web does --------------
+
+_EMPTY = {"results": [], "moreDataAvailable": False}
+_ONE = {"results": [{"foodMetaData": {"foodId": "1", "foodName": "Sausage Roll", "foodType": "BRAND",
+                                      "source": "FATSECRET", "brandName": "Greggs",
+                                      "regionCode": "GB", "languageCode": "en"},
+                     "nutritionContents": []}],
+        "moreDataAvailable": False}
+
 
 @pytest.mark.asyncio
-async def test_search_foods_sends_configured_accept_language(app_with_nutrition, mock_garmin_client):
-    mock_garmin_client.connectapi.return_value = {"results": [], "moreDataAvailable": False}
-    await app_with_nutrition.call_tool("search_foods", {"query": "Greggs"})
+async def test_search_foods_sends_region_and_language(app_with_nutrition, mock_garmin_client):
+    mock_garmin_client.connectapi.return_value = _ONE
+    result = await app_with_nutrition.call_tool("search_foods", {"query": "Greggs"})
     mock_garmin_client.connectapi.assert_called_once_with(
         "/nutrition-service/food/search",
-        params={"searchExpression": "Greggs", "start": 0, "limit": 20},
-        headers={"Accept-Language": "en-GB,en;q=0.9"},
+        params={"searchExpression": "Greggs", "start": 0, "limit": 20,
+                "regionCode": "GB", "languageCode": "en"},
     )
+    data = json.loads(result[0][0].text)
+    assert data["catalogue_region"] == "GB"
+    assert data["results"][0]["region"] == "GB"
 
 
 @pytest.mark.asyncio
-async def test_search_foods_accept_language_follows_override(app_with_nutrition, mock_garmin_client, monkeypatch):
-    monkeypatch.setattr(nutrition, "FOOD_ACCEPT_LANGUAGE", "en-IE,en;q=0.9")
-    mock_garmin_client.connectapi.return_value = {"results": [], "moreDataAvailable": False}
+async def test_search_foods_region_follows_configuration(app_with_nutrition, mock_garmin_client, monkeypatch):
+    monkeypatch.setattr(nutrition, "FOOD_REGION", "IE")
+    mock_garmin_client.connectapi.return_value = _EMPTY
     await app_with_nutrition.call_tool("search_foods", {"query": "Tayto"})
-    assert mock_garmin_client.connectapi.call_args[1]["headers"] == {"Accept-Language": "en-IE,en;q=0.9"}
+    assert mock_garmin_client.connectapi.call_args[1]["params"]["regionCode"] == "IE"
+
+
+@pytest.mark.asyncio
+async def test_search_foods_falls_back_when_region_is_rejected(app_with_nutrition, mock_garmin_client):
+    """A 400 on the region-qualified search must not break search: retry without it."""
+    mock_garmin_client.connectapi.side_effect = [
+        GarminConnectConnectionError("API Error 400 - regionCode not allowed"), _ONE]
+    result = await app_with_nutrition.call_tool("search_foods", {"query": "Greggs"})
+    assert mock_garmin_client.connectapi.call_count == 2
+    assert mock_garmin_client.connectapi.call_args_list[1][1]["params"] == {
+        "searchExpression": "Greggs", "start": 0, "limit": 20}
+    data = json.loads(result[0][0].text)
+    assert data["count"] == 1
+    assert data["catalogue_region"] is None       # tells the caller the region was not applied
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    GarminConnectTooManyRequestsError("API Error 429 - slow down"),
+    GarminConnectConnectionError("API Error 500 - boom"),
+])
+async def test_search_foods_does_not_retry_on_other_errors(app_with_nutrition, mock_garmin_client, error):
+    """Only a 400 means 'parameters rejected'. Never double up requests on a rate limit."""
+    mock_garmin_client.connectapi.side_effect = error
+    result = await app_with_nutrition.call_tool("search_foods", {"query": "Greggs"})
+    assert mock_garmin_client.connectapi.call_count == 1
+    assert "Error" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_search_foods_fallback_works_through_the_real_client_proxy():
+    """In the running worker the client is wrapped by _GarminProxy, which re-raises
+    Garmin errors with a hint added. The 400 fallback must survive that wrapping."""
+    from garmin_mcp import _GarminProxy
+
+    class FakeGarmin:
+        def __init__(self):
+            self.calls = []
+
+        def connectapi(self, path, **kwargs):
+            self.calls.append(kwargs["params"])
+            if "regionCode" in kwargs["params"]:
+                raise GarminConnectConnectionError("API Error 400 - regionCode not allowed")
+            return _ONE
+
+    fake = FakeGarmin()
+    nutrition.configure(_GarminProxy(fake))
+    app = nutrition.register_tools(FastMCP("Test Nutrition Proxy"))
+    result = await app.call_tool("search_foods", {"query": "Greggs"})
+    assert [("regionCode" in c) for c in fake.calls] == [True, False]
+    data = json.loads(result[0][0].text)
+    assert data["count"] == 1 and data["catalogue_region"] is None
+
+
+def test_no_accept_language_override_left_in_module():
+    """The Accept-Language experiment was disproven against the live API; keep it out."""
+    import inspect
+    assert "Accept-Language" not in inspect.getsource(nutrition)
