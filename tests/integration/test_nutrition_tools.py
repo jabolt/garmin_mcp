@@ -1216,6 +1216,7 @@ async def test_search_foods_returns_results(app_with_nutrition, mock_garmin_clie
             "start": 0,
             "limit": 20,
         },
+        headers={"Accept-Language": nutrition.FOOD_ACCEPT_LANGUAGE},
     )
 
 

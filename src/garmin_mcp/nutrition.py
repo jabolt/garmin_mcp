@@ -3,6 +3,7 @@ Nutrition/food logging functions for Garmin Connect MCP Server
 """
 import datetime
 import json
+import os
 from copy import deepcopy
 from typing import Optional
 
@@ -10,6 +11,24 @@ from garminconnect import GarminConnectConnectionError
 
 # The garmin_client will be set by the main file
 garmin_client = None
+
+
+def _food_region(env=os.environ) -> str:
+    """Two-letter region for Garmin's food catalogue, from GARMIN_FOOD_REGION.
+
+    Upstream hard-codes "US"; this fork defaults to the UK.
+    """
+    return (env.get("GARMIN_FOOD_REGION") or "").strip().upper() or "GB"
+
+
+def _accept_language(region: str) -> str:
+    return f"en-{region},en;q=0.9"
+
+
+FOOD_REGION = _food_region()
+# garminconnect sends "Accept-Language: en-US" on every API call. The food
+# catalogue is region-aware, so the search asks for FOOD_REGION's English instead.
+FOOD_ACCEPT_LANGUAGE = _accept_language(FOOD_REGION)
 
 
 def _num_to_str(value: float) -> str:
@@ -256,6 +275,7 @@ def register_tools(app):
             data = garmin_client.connectapi(
                 "/nutrition-service/food/search",
                 params={"searchExpression": query, "start": start, "limit": limit},
+                headers={"Accept-Language": FOOD_ACCEPT_LANGUAGE},
             )
             if not data:
                 return "No foods found."
@@ -435,7 +455,7 @@ def register_tools(app):
                 "foodName": food_name,
                 "foodType": "GENERIC",
                 "source": "GARMIN",
-                "regionCode": "US",
+                "regionCode": FOOD_REGION,
                 "languageCode": "en",
             }
             if brand_name is not None:
@@ -580,7 +600,7 @@ def register_tools(app):
                 "foodName": food_name,
                 "foodType": "GENERIC",
                 "source": "GARMIN",
-                "regionCode": "US",
+                "regionCode": FOOD_REGION,
                 "languageCode": "en",
             }
             if effective_brand is not None:
@@ -703,7 +723,7 @@ def register_tools(app):
                         "foodId": food_id,
                         "servingId": serving_id,
                         "source": source,
-                        "regionCode": "US",
+                        "regionCode": FOOD_REGION,
                         "languageCode": "en",
                         "servingQty": serving_qty,
                     }
@@ -908,7 +928,7 @@ def register_tools(app):
                         "foodName": food_name,
                         "foodType": "GENERIC",
                         "source": "GARMIN",
-                        "regionCode": "US",
+                        "regionCode": FOOD_REGION,
                         "languageCode": "en",
                     },
                     "nutritionContents": [nutrition],
@@ -977,7 +997,7 @@ def register_tools(app):
                         "foodId": food_id,
                         "servingId": serving_id,
                         "source": "GARMIN",
-                        "regionCode": "US",
+                        "regionCode": FOOD_REGION,
                         "languageCode": "en",
                         "servingQty": serving_qty,
                     }
