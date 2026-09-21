@@ -349,6 +349,24 @@ def _parse_transport_config() -> tuple[str, str, int]:
     return transport, http_host, http_port
 
 
+def _parse_stateless() -> bool:
+    """Read GARMIN_MCP_STATELESS. Off by default, which keeps upstream's behaviour."""
+    return os.getenv("GARMIN_MCP_STATELESS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _create_fastmcp(http_host: str, http_port: int) -> FastMCP:
+    """Create the MCP app. host/port only matter for the HTTP transports; stdio ignores them.
+
+    Stateful (default): the SDK keeps each client's session in this process, so a
+    process restart leaves clients holding a dead Mcp-Session-Id (HTTP 404, or 400
+    with none). Behind a supervisor that recycles this process, set
+    GARMIN_MCP_STATELESS=true: no sessions exist, so none can go stale. No tool here
+    uses a session-dependent feature (progress, sampling, elicitation, client logging).
+    """
+    return FastMCP("Garmin Connect v1.0", host=http_host, port=http_port,
+                   stateless_http=_parse_stateless())
+
+
 class _ToolFilter:
     """Wraps a FastMCP app to conditionally register tools by function name.
 
@@ -562,6 +580,7 @@ def main():
     #   GARMIN_MCP_TRANSPORT - stdio (default) | streamable-http | sse
     #   GARMIN_MCP_HOST      - bind address for HTTP transports (default 127.0.0.1)
     #   GARMIN_MCP_PORT      - bind port for HTTP transports (default 8000)
+    #   GARMIN_MCP_STATELESS - true to serve streamable-http without MCP sessions (default false)
     try:
         enabled_tools, disabled_tools = _resolve_tool_filters()
         transport, http_host, http_port = _parse_transport_config()
@@ -598,8 +617,7 @@ def main():
     calendar_events.configure(garmin_client)
 
     # Create the MCP app, wrapped so the env-var filter can drop tools.
-    # host/port only matter for the HTTP transports; stdio ignores them.
-    fastmcp = FastMCP("Garmin Connect v1.0", host=http_host, port=http_port)
+    fastmcp = _create_fastmcp(http_host, http_port)
     app = _ToolFilter(fastmcp, enabled_tools, disabled_tools)
     if enabled_tools:
         print(f"Tool filter: allowlist of {len(enabled_tools)} tool(s).", file=sys.stderr)
@@ -645,8 +663,9 @@ def main():
         async def healthz(_request: "Request") -> "PlainTextResponse":
             return PlainTextResponse("ok")
 
+        mode = " (stateless: no MCP sessions)" if fastmcp.settings.stateless_http else ""
         print(
-            f"Serving MCP over {transport} on {http_host}:{http_port}",
+            f"Serving MCP over {transport} on {http_host}:{http_port}{mode}",
             file=sys.stderr,
         )
 
