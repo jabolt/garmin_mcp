@@ -27,6 +27,7 @@ from garmin_mcp import workout_templates
 from garmin_mcp import data_management
 from garmin_mcp import womens_health
 from garmin_mcp import nutrition
+from garmin_mcp import lifestyle_logging
 from garmin_mcp import workout_builders
 from garmin_mcp import courses
 from garmin_mcp import activity_analysis
@@ -611,6 +612,7 @@ def main():
     data_management.configure(garmin_client)
     womens_health.configure(garmin_client)
     nutrition.configure(garmin_client)
+    lifestyle_logging.configure(garmin_client)
     workout_builders.configure(garmin_client)
     courses.configure(garmin_client)
     activity_analysis.configure(garmin_client)
@@ -637,6 +639,7 @@ def main():
     app = data_management.register_tools(app)
     app = womens_health.register_tools(app)
     app = nutrition.register_tools(app)
+    app = lifestyle_logging.register_tools(app)
     app = workout_builders.register_tools(app)
     app = courses.register_tools(app)
     app = activity_analysis.register_tools(app)

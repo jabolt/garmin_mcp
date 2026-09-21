@@ -684,6 +684,9 @@ def register_tools(app):
         numeric strings (e.g. "4132350"). Passing the wrong source for a
         given food_id returns a 400 from Garmin.
 
+        Food logging does not record caffeine or alcohol as lifestyle behaviours: for a
+        caffeinated or alcoholic drink, also call log_lifestyle_behaviour.
+
         Args:
             meal_date: Date in YYYY-MM-DD format
             meal_time: Time in HH:MM:SS format (e.g. "12:30:00", account timezone)
@@ -876,6 +879,9 @@ def register_tools(app):
         it immediately. If not found, creates it with the provided nutrition
         data and then logs it. This avoids duplicate food entries and removes
         the need for separate search → create → log round-trips.
+
+        Food logging does not record caffeine or alcohol as lifestyle behaviours: for a
+        caffeinated or alcoholic drink, also call log_lifestyle_behaviour.
 
         Args:
             meal_date: Date in YYYY-MM-DD format
