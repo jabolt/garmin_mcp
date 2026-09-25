@@ -164,7 +164,24 @@ def _course_point(p: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _start_finish(first: Optional[Dict[str, Any]], last: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """start/finish as {lat, lon, elevation_m} plus the straight-line gap between them (~0 for a loop)."""
+    start, finish = _course_point(first), _course_point(last)
+    gap = round(_haversine(first, last), 1) if start and finish else None
+    return {"start": start, "finish": finish, "start_finish_gap_m": gap}
+
+
 _GPX_NS = {"gpx": "http://www.topografix.com/GPX/1/1"}
+
+
+def _gpx_point(trkpt) -> Dict[str, Any]:
+    """A GPX <trkpt> element as a geoPoint-style dict."""
+    ele = trkpt.findtext("gpx:ele", namespaces=_GPX_NS)
+    return {
+        "latitude": float(trkpt.get("lat")),
+        "longitude": float(trkpt.get("lon")),
+        "elevation": float(ele) if ele else None,
+    }
 
 
 def register_tools(app):
@@ -231,8 +248,6 @@ def register_tools(app):
             geo_points = _as_list(data.get("geoPoints"))
             first = geo_points[0] if geo_points else data.get("startPoint")
             last = geo_points[-1] if geo_points else None
-            start, finish = _course_point(first), _course_point(last)
-            gap = round(_haversine(first, last), 1) if start and finish else None
 
             result = {
                 "course_id": data.get("courseId"),
@@ -242,9 +257,7 @@ def register_tools(app):
                 "elevation_loss_m": data.get("elevationLossInMeters") or data.get("elevationLossMeter"),
                 "activity": (data.get("activityType") or {}).get("typeKey"),
                 "activity_type_id": data.get("activityTypePk"),
-                "start": start,
-                "finish": finish,
-                "start_finish_gap_m": gap,
+                **_start_finish(first, last),
                 "waypoints_count": len(course_points),
                 "waypoints": course_points,
                 "geo_points_count": len(geo_points),
@@ -258,18 +271,24 @@ def register_tools(app):
     async def download_course_gpx(
         course_id: int,
         output_path: Optional[str] = None,
+        include_gpx: bool = False,
     ) -> str:
         """Download the exact official GPX file for a Garmin Connect course.
 
-        The GPX (Garmin Connect's own export) is returned in the response as
-        "gpx", with a summary. It is also saved to disk only when output_path is
-        given or GARMIN_FIT_DOWNLOAD_DIR is set; a failed save is reported as
-        "file_error" and the GPX is still returned.
+        Returns a summary of Garmin Connect's own GPX export: name, start and
+        finish (first/last track point, lat/lon), the straight-line gap between
+        them, and point counts. The GPX itself is included (as "gpx") only when
+        include_gpx is true: it is large (a 5 km course is ~65 KB), so ask for it
+        only when the full file is actually needed.
+
+        The file is also saved to disk only when output_path is given or
+        GARMIN_FIT_DOWNLOAD_DIR is set; a failed save is reported as "file_error".
 
         Args:
             course_id: ID of the course to download.
             output_path: Optional destination file or directory path on the
                 machine running this server.
+            include_gpx: Include the full GPX text in the response (default false).
         """
         try:
             gpx_bytes = garmin_client.client.download(f"/course-service/course/gpx/{course_id}")
@@ -277,6 +296,7 @@ def register_tools(app):
             name = root.findtext("gpx:metadata/gpx:name", namespaces=_GPX_NS) or root.findtext(
                 "gpx:trk/gpx:name", namespaces=_GPX_NS
             )
+            trkpts = root.findall(".//gpx:trkpt", _GPX_NS)
 
             gpx_path, file_error = None, None
             target_path = _resolve_gpx_output_path(course_id, output_path)
@@ -293,14 +313,19 @@ def register_tools(app):
                 "status": "success",
                 "course_id": course_id,
                 "name": name,
+                **_start_finish(
+                    _gpx_point(trkpts[0]) if trkpts else None,
+                    _gpx_point(trkpts[-1]) if trkpts else None,
+                ),
                 "waypoints_count": len(root.findall("gpx:wpt", _GPX_NS)),
-                "track_points_count": len(root.findall(".//gpx:trkpt", _GPX_NS)),
+                "track_points_count": len(trkpts),
                 "size_bytes": len(gpx_bytes),
                 "gpx_path": gpx_path,
             }
             if file_error:
                 result["file_error"] = file_error
-            result["gpx"] = gpx_bytes.decode("utf-8")
+            if include_gpx:
+                result["gpx"] = gpx_bytes.decode("utf-8")
             return json.dumps(result, indent=2)
         except Exception as e:
             return f"Error downloading course GPX: {str(e)}"

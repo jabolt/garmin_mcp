@@ -190,10 +190,10 @@ def no_download_dir(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_download_course_gpx_returns_official_gpx(
+async def test_download_course_gpx_summary_by_default(
     app_with_courses, mock_garmin_client, no_download_dir
 ):
-    """Garmin's own export is returned in the response; nothing is written to disk."""
+    """By default only a summary comes back (no GPX body), and nothing is written to disk."""
     mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
 
     result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 700000001})
@@ -206,7 +206,7 @@ async def test_download_course_gpx_returns_official_gpx(
     assert data["waypoints_count"] == 1
     assert data["size_bytes"] == len(MOCK_COURSE_GPX)
     assert data["gpx_path"] is None
-    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+    assert "gpx" not in data
     mock_garmin_client.client.download.assert_called_once_with(
         "/course-service/course/gpx/700000001"
     )
@@ -214,10 +214,61 @@ async def test_download_course_gpx_returns_official_gpx(
 
 
 @pytest.mark.asyncio
+async def test_download_course_gpx_start_and_finish(
+    app_with_courses, mock_garmin_client, no_download_dir
+):
+    """The summary gives start and finish from the first and last GPX track points."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+
+    result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
+    assert data["start"] == {"lat": 51.5, "lon": -0.1, "elevation_m": 20.5}
+    assert data["finish"] == {"lat": 51.501, "lon": -0.1, "elevation_m": 21.25}
+    assert data["start_finish_gap_m"] == 111.2
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_without_track(
+    app_with_courses, mock_garmin_client, no_download_dir
+):
+    """A GPX with no track points has no start or finish, rather than an error."""
+    mock_garmin_client.client.download.return_value = (
+        b'<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">'
+        b"<metadata><name>Empty</name></metadata></gpx>"
+    )
+
+    result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 1})
+
+    data = json.loads(_result_text(result))
+    assert data["name"] == "Empty"
+    assert data["track_points_count"] == 0
+    assert data["start"] is None
+    assert data["finish"] is None
+    assert data["start_finish_gap_m"] is None
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_include_gpx(
+    app_with_courses, mock_garmin_client, no_download_dir
+):
+    """include_gpx=True returns Garmin's export unchanged in the response."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+
+    result = await app_with_courses.call_tool(
+        "download_course_gpx", {"course_id": 700000001, "include_gpx": True}
+    )
+
+    data = json.loads(_result_text(result))
+    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+    assert data["track_points_count"] == 3
+
+
+@pytest.mark.asyncio
 async def test_download_course_gpx_writes_output_path(
     app_with_courses, mock_garmin_client, tmp_path
 ):
-    """An explicit output_path gets Garmin's bytes unchanged, and the content is still returned."""
+    """An explicit output_path gets Garmin's bytes unchanged; the response stays a summary."""
     mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
     out_file = tmp_path / "riverside.gpx"
 
@@ -228,7 +279,7 @@ async def test_download_course_gpx_writes_output_path(
     data = json.loads(_result_text(result))
     assert data["gpx_path"] == str(out_file)
     assert out_file.read_bytes() == MOCK_COURSE_GPX
-    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+    assert "gpx" not in data
 
 
 @pytest.mark.asyncio
@@ -248,10 +299,10 @@ async def test_download_course_gpx_env_dir(
 
 
 @pytest.mark.asyncio
-async def test_download_course_gpx_unwritable_path_still_returns_gpx(
+async def test_download_course_gpx_unwritable_path(
     app_with_courses, mock_garmin_client, tmp_path
 ):
-    """A path that can't be written (as on a read-only host) doesn't lose the GPX."""
+    """A path that can't be written (as on a read-only host) is reported, not fatal."""
     mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("")
@@ -265,7 +316,7 @@ async def test_download_course_gpx_unwritable_path_still_returns_gpx(
     assert data["status"] == "success"
     assert data["gpx_path"] is None
     assert data["file_error"]
-    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+    assert data["start"] == {"lat": 51.5, "lon": -0.1, "elevation_m": 20.5}
 
 
 @pytest.mark.asyncio
