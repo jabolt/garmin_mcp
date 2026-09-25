@@ -227,6 +227,10 @@ def register_tools(app):
         for a loop), total distance, elevation gain/loss, and any course
         waypoints (water, food, hazards, segment start/end, ...).
 
+        To save a course's start or finish as a saved location on the user's
+        watch, use get_course_location_share instead; don't build Google Maps
+        or other web map links, which can't send a location to Garmin.
+
         Args:
             course_id: ID of the course (from get_courses).
         """
@@ -263,6 +267,11 @@ def register_tools(app):
                 "waypoints": course_points,
                 "geo_points_count": len(geo_points),
                 "url": f"https://connect.{garmin_client.client.domain}/modern/course/{course_id}",
+                "save_to_watch": (
+                    "To save the start or finish as a saved location on the watch, call "
+                    "get_course_location_share(course_id, point='start'|'finish'). Don't give "
+                    "Google Maps or web map links: they can't send a location to Garmin."
+                ),
             }
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -382,6 +391,12 @@ def register_tools(app):
                     "elevation_m": location["elevation_m"],
                     "coordinates": f"{lat}, {lon}",
                     "apple_maps_url": f"maps://?ll={lat},{lon}&q={quote(label)}",
+                    "present_as": (
+                        f"Reply with the name \"{label}\" and the coordinates {lat}, {lon} on their own "
+                        "in a code block so the user can copy them, then the how_to_save steps. "
+                        "Do not give Google Maps or web map links: only the iPhone Maps app can "
+                        "share a location to Garmin Connect."
+                    ),
                     "how_to_save": [
                         "Keep the watch connected to the iPhone over Bluetooth.",
                         f"Open the Maps app and paste {lat}, {lon} into the search bar "

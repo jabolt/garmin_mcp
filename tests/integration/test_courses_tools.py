@@ -598,3 +598,28 @@ async def test_course_location_share_error_is_caught(app_with_courses, mock_garm
     )
 
     assert "Error getting course location: API Error 404" in _result_text(result)
+
+
+@pytest.mark.asyncio
+async def test_get_course_details_points_to_location_share(app_with_courses, mock_garmin_client):
+    """Course details steer saving a start/finish on the watch to get_course_location_share."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
+    assert "get_course_location_share" in data["save_to_watch"]
+
+
+@pytest.mark.asyncio
+async def test_course_location_share_says_how_to_present(app_with_courses, mock_garmin_client):
+    """The share response tells Claude to show the copyable coordinates, not a web map link."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001}
+    )
+
+    data = json.loads(_result_text(result))
+    assert "51.5, -0.1" in data["present_as"]
+    assert "Google Maps" in data["present_as"]
