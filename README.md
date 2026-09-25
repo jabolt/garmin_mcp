@@ -1074,7 +1074,7 @@ uv run pytest tests/e2e/ -m e2e -v
 
 ### Test Structure
 
-- **Integration tests** (200+ tests): Test all MCP tools using FastMCP integration with mocked Garmin API responses
+- **Integration tests** (200+ tests): Test all MCP tools using MCPServer (mcp 2.x) integration with mocked Garmin API responses
 - **End-to-end tests** (4 tests): Test with real MCP server and Garmin API (requires valid credentials)
 
 ## Reinstalling from local path

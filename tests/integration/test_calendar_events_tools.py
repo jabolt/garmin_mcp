@@ -1,29 +1,29 @@
 """
 Integration tests for the calendar_events module MCP tools.
 
-Covers get_calendar_events using FastMCP integration with a mocked Garmin
+Covers get_calendar_events using MCPServer integration with a mocked Garmin
 client. No real Garmin account or network access is used.
 """
 import json
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import calendar_events
 
 
 @pytest.fixture
 def app_with_calendar_events(mock_garmin_client):
-    """Create a FastMCP app with the calendar event tools registered."""
+    """Create an MCPServer app with the calendar event tools registered."""
     calendar_events.configure(mock_garmin_client)
-    app = FastMCP("Test Calendar Events")
+    app = MCPServer("Test Calendar Events")
     app = calendar_events.register_tools(app)
     return app
 
 
 def _result_text(result):
-    """Extract the text payload from a FastMCP call_tool result."""
-    return result[0][0].text
+    """Extract the text payload from an MCPServer call_tool result."""
+    return result.content[0].text
 
 
 def _race(date, title="Some Marathon", uuid="uuid-1", **overrides):

@@ -1,11 +1,11 @@
 """
 Integration tests for workouts module MCP tools
 
-Tests workout tools using FastMCP integration with mocked Garmin API responses.
+Tests workout tools using MCPServer integration with mocked Garmin API responses.
 """
 import pytest
 from unittest.mock import Mock
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import workouts
 from garmin_mcp.workouts import (
@@ -21,14 +21,14 @@ from tests.fixtures.garmin_responses import (
 
 @pytest.fixture
 def app_with_workouts(mock_garmin_client):
-    """Create FastMCP app with workouts tools registered"""
+    """Create MCPServer app with workouts tools registered"""
     # Default: pre-check used by schedule_* tools sees no existing schedule
     # so the POST path runs as before. Individual tests override this.
     mock_garmin_client.query_garmin_graphql.return_value = {
         "data": {"workoutScheduleSummariesScalar": []}
     }
     workouts.configure(mock_garmin_client)
-    app = FastMCP("Test Workouts")
+    app = MCPServer("Test Workouts")
     app = workouts.register_tools(app)
     return app
 
@@ -99,7 +99,7 @@ async def test_get_workout_by_id_tool(app_with_workouts, mock_garmin_client):
     # Setup mock
     mock_garmin_client.get_workout_by_id.return_value = MOCK_WORKOUT_DETAILS
 
-    # Call tool with numeric ID (FastMCP passes numeric strings as int)
+    # Call tool with numeric ID (MCPServer passes numeric strings as int)
     workout_id = 123456
     result = await app_with_workouts.call_tool(
         "get_workout_by_id",
@@ -112,7 +112,7 @@ async def test_get_workout_by_id_tool(app_with_workouts, mock_garmin_client):
     mock_garmin_client.connectapi.assert_not_called()
 
     # Parse the result and verify curation includes steps
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["id"] == 123456
     assert result_data["name"] == "5K Tempo Run"
     assert result_data["sport"] == "running"
@@ -150,7 +150,7 @@ async def test_get_workout_by_id_tool_handles_swim_secondary_targets(
         {"workout_id": 1528077786}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["id"] == 1528077786
     assert result_data["sport"] == "swimming"
     assert result_data["estimated_distance_meters"] == 3000.0
@@ -214,7 +214,7 @@ async def test_get_workout_by_id_tool_ignores_malformed_target_blocks(
         {"workout_id": 123457}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     step = result_data["segments"][0]["steps"][0]
     assert step["type"] == "warmup"
     assert step["end_condition"] == "distance"
@@ -270,7 +270,7 @@ async def test_get_workout_by_uuid_tool(app_with_workouts, mock_garmin_client):
     mock_garmin_client.get_workout_by_id.assert_not_called()
 
     # Parse the result and verify training plan workout fields
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["uuid"] == workout_uuid
     assert result_data["name"] == "Base"
     assert result_data["sport"] == "running"
@@ -352,7 +352,7 @@ async def test_upload_workout_promotes_bounds_nested_inside_target_type(
         {"workout_data": workout_data},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
     called_step = mock_garmin_client.upload_workout.call_args[0][0][
         "workoutSegments"
@@ -420,7 +420,7 @@ async def test_upload_workout_rejects_conflicting_nested_and_step_bounds(
         {"workout_data": workout_data},
     )
 
-    message = result[0][0].text
+    message = result.content[0].text
     assert (
         "workoutSegments[0].workoutSteps[0].targetValueOne=2.5 conflicts with "
         "workoutSegments[0].workoutSteps[0].targetType.targetValueOne="
@@ -548,7 +548,7 @@ async def test_upload_workout_rejects_zone_mixed_with_custom_range(
         {"workout_data": workout_data},
     )
 
-    message = result[0][0].text
+    message = result.content[0].text
     assert "mixes zoneNumber=3 with custom range fields" in message
     assert "use either a named zone or a custom range" in message
     mock_garmin_client.upload_workout.assert_not_called()
@@ -593,7 +593,7 @@ async def test_upload_workout_fixes_hr_zone_target(app_with_workouts, mock_garmi
     assert "targetValueOne" not in step
     assert "targetValueTwo" not in step
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
 
@@ -651,7 +651,7 @@ async def test_upload_workout_fixes_hr_zone_in_repeat_group(app_with_workouts, m
     assert "targetValueOne" not in interval_step
     assert "targetValueTwo" not in interval_step
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
 
@@ -675,7 +675,7 @@ async def test_upload_workout_rejects_mismatched_end_condition_id(
     )
 
     assert result is not None
-    message = result[0][0].text
+    message = result.content[0].text
     assert "Error uploading workout" in message
     assert "conditionTypeKey 'heart.rate' requires conditionTypeId 6" in message
     assert "got 4 (calories)" in message
@@ -695,10 +695,10 @@ async def test_upload_workout_rejects_target_type_mismatch(app_with_workouts, mo
         {"workout_data": workout_data}
     )
 
-    assert "targetType mismatch" in result[0][0].text
+    assert "targetType mismatch" in result.content[0].text
     # ID 6 is valid for 'pace.zone' (running) and 'power.between' (cycling), not 'heart.rate'
-    assert "workoutTargetTypeId 6 is one of" in result[0][0].text
-    assert "not 'heart.rate'" in result[0][0].text
+    assert "workoutTargetTypeId 6 is one of" in result.content[0].text
+    assert "not 'heart.rate'" in result.content[0].text
     mock_garmin_client.upload_workout.assert_not_called()
 
 
@@ -754,7 +754,7 @@ async def test_upload_workout_accepts_custom_hr_range(app_with_workouts, mock_ga
     assert step["targetValueTwo"] == 157
     assert "zoneNumber" not in step
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
 
@@ -784,7 +784,7 @@ async def test_upload_workout_rejects_nested_end_condition_mismatch(
     )
 
     assert result is not None
-    message = result[0][0].text
+    message = result.content[0].text
     assert "workoutSegments[0].workoutSteps[0].workoutSteps[0]" in message
     assert "conditionTypeKey 'heart.rate' requires conditionTypeId 6" in message
     mock_garmin_client.upload_workout.assert_not_called()
@@ -809,7 +809,7 @@ async def test_upload_workout_rejects_nested_target_type_mismatch(app_with_worko
         {"workout_data": workout_data}
     )
 
-    assert "workoutSegments[0].workoutSteps[0].workoutSteps[0].targetType mismatch" in result[0][0].text
+    assert "workoutSegments[0].workoutSteps[0].workoutSteps[0].targetType mismatch" in result.content[0].text
     mock_garmin_client.upload_workout.assert_not_called()
 
 
@@ -833,7 +833,7 @@ async def test_upload_workout_rejects_missing_end_condition_id(
     )
 
     assert result is not None
-    message = result[0][0].text
+    message = result.content[0].text
     assert "conditionTypeKey 'heart.rate' requires conditionTypeId 6" in message
     mock_garmin_client.upload_workout.assert_not_called()
 
@@ -855,10 +855,10 @@ async def test_upload_workout_rejects_secondary_target_type_mismatch(app_with_wo
         {"workout_data": workout_data}
     )
 
-    assert "secondaryTargetType mismatch" in result[0][0].text
+    assert "secondaryTargetType mismatch" in result.content[0].text
     # ID 6 is valid for 'pace.zone' (running) and 'power.between' (cycling), not 'heart.rate'
-    assert "workoutTargetTypeId 6 is one of" in result[0][0].text
-    assert "not 'heart.rate'" in result[0][0].text
+    assert "workoutTargetTypeId 6 is one of" in result.content[0].text
+    assert "not 'heart.rate'" in result.content[0].text
     mock_garmin_client.upload_workout.assert_not_called()
 
 
@@ -889,7 +889,7 @@ async def test_upload_workout_accepts_secondary_target_type_with_null_primary(
     assert called_step["targetType"] is None
     assert called_step["secondaryTargetType"]["workoutTargetTypeKey"] == "pace.zone"
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
 
@@ -917,7 +917,7 @@ async def test_upload_workout_rejects_nested_secondary_target_type_mismatch(
 
     assert (
         "workoutSegments[0].workoutSteps[0].workoutSteps[0].secondaryTargetType mismatch"
-        in result[0][0].text
+        in result.content[0].text
     )
     mock_garmin_client.upload_workout.assert_not_called()
 
@@ -970,7 +970,7 @@ async def test_upload_cycling_workout_power_between_accepted(app_with_workouts, 
         {"workout_data": workout_data}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
     assert result_data["workout_id"] == 200001
 
@@ -1009,7 +1009,7 @@ async def test_upload_cycling_workout_power_zone_accepted(app_with_workouts, moc
         {"workout_data": workout_data}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
     called_data = mock_garmin_client.upload_workout.call_args[0][0]
@@ -1048,9 +1048,9 @@ async def test_upload_cycling_workout_wrong_id_for_power_between_rejected(
         {"workout_data": workout_data}
     )
 
-    assert "targetType mismatch" in result[0][0].text
+    assert "targetType mismatch" in result.content[0].text
     # ID 2 maps to 'power.zone' only (single key) so the error names it directly
-    assert "workoutTargetTypeId 2 is 'power.zone', not 'power.between'" in result[0][0].text
+    assert "workoutTargetTypeId 2 is 'power.zone', not 'power.between'" in result.content[0].text
     mock_garmin_client.upload_workout.assert_not_called()
 
 
@@ -1080,10 +1080,10 @@ async def test_upload_cycling_workout_wrong_id_for_power_zone_rejected(
         {"workout_data": workout_data}
     )
 
-    assert "targetType mismatch" in result[0][0].text
+    assert "targetType mismatch" in result.content[0].text
     # ID 6 has two valid keys (pace.zone, power.between) so the error lists both
-    assert "workoutTargetTypeId 6 is one of" in result[0][0].text
-    assert "not 'power.zone'" in result[0][0].text
+    assert "workoutTargetTypeId 6 is one of" in result.content[0].text
+    assert "not 'power.zone'" in result.content[0].text
     mock_garmin_client.upload_workout.assert_not_called()
 
 
@@ -1152,7 +1152,7 @@ async def test_upload_cycling_workout_power_between_in_repeat_group(
         {"workout_data": workout_data}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
 
     called_data = mock_garmin_client.upload_workout.call_args[0][0]
@@ -1195,7 +1195,7 @@ async def test_get_scheduled_workouts_tool(app_with_workouts, mock_garmin_client
     )
 
     # Verify curation extracts correct fields
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["count"] == 1
     workout = result_data["scheduled_workouts"][0]
     assert workout["name"] == "5K Tempo Run"
@@ -1253,7 +1253,7 @@ async def test_get_scheduled_workouts_preserves_manual_shape_and_adds_plan_ids(
         {"start_date": "2024-01-15", "end_date": "2024-01-16"},
     )
 
-    scheduled = json_module.loads(result[0][0].text)["scheduled_workouts"]
+    scheduled = json_module.loads(result.content[0].text)["scheduled_workouts"]
     assert scheduled[0] == {
         "date": "2024-01-15",
         "scheduled_workout_id": 1001,
@@ -1340,7 +1340,7 @@ async def test_get_garmin_coach_workout_tools(
     mock_garmin_client.query_garmin_graphql.assert_called_once()
 
     # Verify curation extracts correct fields
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["date"] == "2024-01-15"
     assert result_data["training_plans"] == ["5K Training Plan"]
     assert result_data["plans"] == [
@@ -1417,7 +1417,7 @@ async def test_get_garmin_coach_workouts_stp_numeric_ids(
         {"calendar_date": "2024-01-15"},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["training_plans"] == ["Push, Pull, Legs"]
     assert result_data["plans"] == [
         {
@@ -1477,7 +1477,7 @@ async def test_get_garmin_coach_workouts_includes_rest_days(
         {"calendar_date": "2024-01-15"},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["count"] == 1
     rest_day = result_data["workouts"][0]
     assert rest_day["workout_uuid"] == "rest-123"
@@ -1525,7 +1525,7 @@ async def test_get_garmin_coach_workouts_handles_malformed_plan_entries(
         {"calendar_date": "2024-01-15"},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["training_plans"] == ["Adaptive Plan"]
     assert result_data["count"] == 1
     assert result_data["workouts"][0]["workout_uuid"] == "abc-123"
@@ -1580,7 +1580,7 @@ async def test_get_garmin_coach_workouts_handles_missing_plan_data(
         {"calendar_date": "2024-01-15"},
     )
 
-    assert result[0][0].text == expected
+    assert result.content[0].text == expected
 
 
 @pytest.mark.asyncio
@@ -1594,7 +1594,7 @@ async def test_get_garmin_coach_workouts_rejects_invalid_date(
         {"calendar_date": "2024-01-15-invalid"},
     )
 
-    assert result[0][0].text == (
+    assert result.content[0].text == (
         "Error retrieving Garmin Coach workouts: Invalid calendar_date "
         "'2024-01-15-invalid': expected YYYY-MM-DD"
     )
@@ -1618,7 +1618,7 @@ async def test_delete_workout_success(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
     assert result_data["workout_id"] == 123456
     assert "deleted successfully" in result_data["message"]
@@ -1639,7 +1639,7 @@ async def test_delete_workout_failure(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "failed"
     assert result_data["workout_id"] == 999999
     assert "404" in result_data["message"]
@@ -1658,7 +1658,7 @@ async def test_delete_workout_exception(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "failed"
     assert "Network error" in result_data["message"]
 
@@ -1710,7 +1710,7 @@ async def test_delete_workouts_single(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 0
@@ -1731,7 +1731,7 @@ async def test_delete_workouts_multiple(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 3
     assert result_data["succeeded"] == 3
     assert result_data["failed"] == 0
@@ -1754,7 +1754,7 @@ async def test_delete_workouts_partial_failure(app_with_workouts, mock_garmin_cl
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -1776,7 +1776,7 @@ async def test_delete_workouts_exception(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -1798,7 +1798,7 @@ async def test_upload_workouts_single(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 0
@@ -1855,7 +1855,7 @@ async def test_upload_workouts_multiple(app_with_workouts, mock_garmin_client):
     result = await app_with_workouts.call_tool("upload_workouts", {"workouts": workouts})
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 3
     assert result_data["succeeded"] == 3
     assert result_data["failed"] == 0
@@ -1879,7 +1879,7 @@ async def test_upload_workouts_partial_failure(app_with_workouts, mock_garmin_cl
     result = await app_with_workouts.call_tool("upload_workouts", {"workouts": workouts})
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -1924,7 +1924,7 @@ async def test_upload_workouts_reports_end_condition_validation_error(
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -1958,7 +1958,7 @@ async def test_upload_workouts_rejects_target_type_mismatch(app_with_workouts, m
         {"workouts": [good_workout, bad_workout]},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -1985,7 +1985,7 @@ async def test_schedule_workouts_single(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 0
@@ -2018,7 +2018,7 @@ async def test_schedule_workouts_multiple(app_with_workouts, mock_garmin_client)
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 3
     assert result_data["succeeded"] == 3
     assert result_data["failed"] == 0
@@ -2048,7 +2048,7 @@ async def test_schedule_workouts_partial_failure(app_with_workouts, mock_garmin_
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -2068,7 +2068,7 @@ async def test_schedule_workouts_missing_fields(app_with_workouts, mock_garmin_c
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2088,7 +2088,7 @@ async def test_schedule_workouts_rejects_invalid_date(app_with_workouts, mock_ga
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2113,7 +2113,7 @@ async def test_schedule_workouts_invalid_date_skips_inline_upload(
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["failed"] == 1
     assert result_data["results"][0]["status"] == "failed"
     assert "YYYY-MM-DD" in result_data["results"][0]["message"]
@@ -2132,7 +2132,7 @@ async def test_schedule_workout_rejects_invalid_date(app_with_workouts, mock_gar
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "failed"
     assert result_data["workout_id"] == 123456
     assert "YYYY-MM-DD" in result_data["message"]
@@ -2153,7 +2153,7 @@ async def test_schedule_workouts_exception(app_with_workouts, mock_garmin_client
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2190,7 +2190,7 @@ async def test_schedule_workouts_idempotent(app_with_workouts, mock_garmin_clien
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 0
@@ -2220,7 +2220,7 @@ async def test_schedule_workouts_inline_upload(app_with_workouts, mock_garmin_cl
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 0
@@ -2295,7 +2295,7 @@ async def test_schedule_workouts_inline_upload_rejects_end_condition_mismatch(
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2320,7 +2320,7 @@ async def test_schedule_workouts_rejects_inline_target_type_mismatch(app_with_wo
         {"schedules": [{"workout_data": inline_data, "calendar_date": "2024-02-01"}]},
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2351,7 +2351,7 @@ async def test_schedule_workouts_mixed_inline_and_id(app_with_workouts, mock_gar
     result = await app_with_workouts.call_tool("schedule_workouts", {"schedules": schedules})
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 2
     assert result_data["failed"] == 0
@@ -2370,7 +2370,7 @@ async def test_schedule_workouts_missing_both_id_and_data(app_with_workouts, moc
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2392,7 +2392,7 @@ async def test_schedule_workouts_inline_upload_no_id_returned(app_with_workouts,
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 1
     assert result_data["succeeded"] == 0
     assert result_data["failed"] == 1
@@ -2572,7 +2572,7 @@ async def test_unschedule_workout_success(app_with_workouts, mock_garmin_client)
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "success"
     assert result_data["scheduled_workout_id"] == scheduled_workout_id
     assert "removed from calendar" in result_data["message"]
@@ -2592,7 +2592,7 @@ async def test_unschedule_workout_error(app_with_workouts, mock_garmin_client):
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["status"] == "failed"
     assert result_data["scheduled_workout_id"] == 999
     assert "Network error" in result_data["message"]
@@ -2612,7 +2612,7 @@ async def test_unschedule_workouts_multiple(app_with_workouts, mock_garmin_clien
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 3
     assert result_data["succeeded"] == 3
     assert result_data["failed"] == 0
@@ -2635,7 +2635,7 @@ async def test_unschedule_workouts_partial_failure(app_with_workouts, mock_garmi
     )
 
     assert result is not None
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     assert result_data["total"] == 2
     assert result_data["succeeded"] == 1
     assert result_data["failed"] == 1
@@ -2671,7 +2671,7 @@ async def test_get_scheduled_workouts_exposes_scheduled_id(app_with_workouts, mo
         {"start_date": "2024-01-08", "end_date": "2024-01-15"}
     )
 
-    result_data = json_module.loads(result[0][0].text)
+    result_data = json_module.loads(result.content[0].text)
     workout = result_data["scheduled_workouts"][0]
     assert workout["scheduled_workout_id"] == 555
     assert workout["workout_id"] == 123456
@@ -2692,6 +2692,6 @@ async def test_get_scheduled_workouts_handles_null_graphql_data(app_with_workout
         "get_scheduled_workouts",
         {"start_date": "2024-01-08", "end_date": "2024-01-15"},
     )
-    text = result[0][0].text
+    text = result.content[0].text
     assert "NoneType" not in text
     assert "No workouts scheduled" in text

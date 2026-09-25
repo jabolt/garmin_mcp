@@ -8,7 +8,8 @@ import base64
 import threading
 
 import requests
-from mcp.server.fastmcp import FastMCP
+from mcp.server.caching import CacheHint
+from mcp.server.mcpserver import MCPServer
 
 from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnectConnectionError, GarminConnectTooManyRequestsError
 
@@ -355,21 +356,51 @@ def _parse_stateless() -> bool:
     return os.getenv("GARMIN_MCP_STATELESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _create_fastmcp(http_host: str, http_port: int) -> FastMCP:
-    """Create the MCP app. host/port only matter for the HTTP transports; stdio ignores them.
+def _parse_tools_list_ttl() -> int:
+    """Read GARMIN_MCP_TOOLS_LIST_TTL: seconds a client may cache the tool list (default 3600).
 
-    Stateful (default): the SDK keeps each client's session in this process, so a
-    process restart leaves clients holding a dead Mcp-Session-Id (HTTP 404, or 400
-    with none). Behind a supervisor that recycles this process, set
-    GARMIN_MCP_STATELESS=true: no sessions exist, so none can go stale. No tool here
-    uses a session-dependent feature (progress, sampling, elicitation, client logging).
+    Sent as `ttlMs` on 2026-07-28 `tools/list` results. Claude's platform caches the
+    tool list, so this bounds how long a newly deployed tool can stay invisible to it.
     """
-    return FastMCP("Garmin Connect v1.0", host=http_host, port=http_port,
-                   stateless_http=_parse_stateless())
+    raw = os.getenv("GARMIN_MCP_TOOLS_LIST_TTL", "3600").strip()
+    if not raw.isdigit():
+        raise ValueError(
+            f"Invalid GARMIN_MCP_TOOLS_LIST_TTL {raw!r}; expected a whole number of seconds"
+        )
+    return int(raw)
+
+
+def _create_server() -> MCPServer:
+    """Create the MCP server.
+
+    mcp 2.x serves both protocol eras on one endpoint: initialize-handshake clients
+    and 2026-07-28 clients (`server/discover`, cache hints on list results).
+    """
+    ttl_ms = _parse_tools_list_ttl() * 1000
+    return MCPServer("Garmin Connect v1.0",
+                     cache_hints={"tools/list": CacheHint(ttl_ms=ttl_ms, scope="private")})
+
+
+def _run_options(transport: str, http_host: str, http_port: int) -> dict:
+    """Keyword arguments for MCPServer.run(). stdio takes none.
+
+    Stateful streamable-http (default): the SDK keeps each initialize-handshake
+    client's session in this process, so a process restart leaves clients holding a
+    dead Mcp-Session-Id (HTTP 404, or 400 with none). Behind a supervisor that
+    recycles this process, set GARMIN_MCP_STATELESS=true: no sessions exist, so none
+    can go stale. No tool here uses a session-dependent feature (progress, sampling,
+    elicitation, client logging).
+    """
+    if transport == "stdio":
+        return {}
+    options = {"host": http_host, "port": http_port}
+    if transport == "streamable-http":
+        options["stateless_http"] = _parse_stateless()
+    return options
 
 
 class _ToolFilter:
-    """Wraps a FastMCP app to conditionally register tools by function name.
+    """Wraps the MCP server to conditionally register tools by function name.
 
     Modules register via ``@app.tool()``; we intercept that decorator and skip
     registration for any tool not permitted by the env-var filter. All other
@@ -389,6 +420,12 @@ class _ToolFilter:
         return name not in self._disabled
 
     def tool(self, *args, **kwargs):
+        # Most tools return json.dumps(...) as str. The SDK's default
+        # structured_output auto-detection then wraps that string again as
+        # structuredContent {"result": "<escaped json>"}, doubling payload
+        # size for clients that forward both blocks (issue #331). Opt out
+        # globally; callers can still pass structured_output=True explicitly.
+        kwargs.setdefault("structured_output", False)
         decorator = self._app.tool(*args, **kwargs)
         # Prefer the explicit registered name if given (@app.tool(name="x")),
         # so the env-var filter matches what the user actually configures.
@@ -582,9 +619,11 @@ def main():
     #   GARMIN_MCP_HOST      - bind address for HTTP transports (default 127.0.0.1)
     #   GARMIN_MCP_PORT      - bind port for HTTP transports (default 8000)
     #   GARMIN_MCP_STATELESS - true to serve streamable-http without MCP sessions (default false)
+    #   GARMIN_MCP_TOOLS_LIST_TTL - seconds a client may cache the tool list (default 3600)
     try:
         enabled_tools, disabled_tools = _resolve_tool_filters()
         transport, http_host, http_port = _parse_transport_config()
+        server = _create_server()
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
@@ -618,9 +657,8 @@ def main():
     activity_analysis.configure(garmin_client)
     calendar_events.configure(garmin_client)
 
-    # Create the MCP app, wrapped so the env-var filter can drop tools.
-    fastmcp = _create_fastmcp(http_host, http_port)
-    app = _ToolFilter(fastmcp, enabled_tools, disabled_tools)
+    # Wrap the MCP server so the env-var filter can drop tools.
+    app = _ToolFilter(server, enabled_tools, disabled_tools)
     if enabled_tools:
         print(f"Tool filter: allowlist of {len(enabled_tools)} tool(s).", file=sys.stderr)
     elif disabled_tools:
@@ -656,24 +694,26 @@ def main():
             file=sys.stderr,
         )
 
+    run_options = _run_options(transport, http_host, http_port)
+
     # When serving over HTTP, expose a plain health endpoint for k8s probes.
     # The MCP endpoint itself requires a handshake and isn't probe-friendly.
     if transport != "stdio":
         from starlette.requests import Request
         from starlette.responses import PlainTextResponse
 
-        @fastmcp.custom_route("/healthz", methods=["GET"])
+        @server.custom_route("/healthz", methods=["GET"])
         async def healthz(_request: "Request") -> "PlainTextResponse":
             return PlainTextResponse("ok")
 
-        mode = " (stateless: no MCP sessions)" if fastmcp.settings.stateless_http else ""
+        mode = " (stateless: no MCP sessions)" if run_options.get("stateless_http") else ""
         print(
             f"Serving MCP over {transport} on {http_host}:{http_port}{mode}",
             file=sys.stderr,
         )
 
     # Run the MCP server
-    app.run(transport=transport)
+    app.run(transport=transport, **run_options)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 """
 Integration tests for challenges module MCP tools
 
-Tests all 9 challenges and badges tools using FastMCP integration with mocked Garmin API responses.
+Tests all 9 challenges and badges tools using MCPServer integration with mocked Garmin API responses.
 """
 import json
 
 import pytest
 from unittest.mock import Mock
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import challenges
 from tests.fixtures.garmin_responses import (
@@ -19,9 +19,9 @@ from tests.fixtures.garmin_responses import (
 
 @pytest.fixture
 def app_with_challenges(mock_garmin_client):
-    """Create FastMCP app with challenges tools registered"""
+    """Create MCPServer app with challenges tools registered"""
     challenges.configure(mock_garmin_client)
-    app = FastMCP("Test Challenges")
+    app = MCPServer("Test Challenges")
     app = challenges.register_tools(app)
     return app
 
@@ -293,7 +293,7 @@ async def test_get_inprogress_virtual_challenges_tool(app_with_challenges, mock_
     # Verify
     assert result is not None
     mock_garmin_client.get_inprogress_virtual_challenges.assert_called_once_with(1, 20)
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload == {
         "total": 1,
         "challenges": [
@@ -361,7 +361,7 @@ async def test_get_inprogress_virtual_challenges_legacy_fields(
         {},
     )
 
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["challenges"][0] == {
         "name": expected_name,
         "uuid": "LEGACY123",
@@ -409,7 +409,7 @@ async def test_get_inprogress_virtual_challenges_non_distance_units(
         {},
     )
 
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     challenge = payload["challenges"][0]
     assert challenge["progress"] == formatted_progress
     assert challenge["target"] == formatted_target
@@ -440,7 +440,7 @@ async def test_get_inprogress_virtual_challenges_skips_zero_target(
         {},
     )
 
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     challenge = payload["challenges"][0]
     assert challenge["name"] == "Fallback Name"
     assert set(challenge) == {"name", "uuid", "start_date", "end_date"}

@@ -2,13 +2,13 @@
 Integration tests for the courses module MCP tools.
 
 Covers get_courses, get_course_details, download_course_gpx, upload_course, and delete_course
-using FastMCP integration with a mocked Garmin client. No real Garmin account or network access is used.
+using MCPServer integration with a mocked Garmin client. No real Garmin account or network access is used.
 """
 import json
 import os
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import courses
 from garmin_mcp.courses import _build_course_payload, _haversine, _resolve_gpx_output_path
@@ -22,16 +22,16 @@ from tests.fixtures.garmin_responses import (
 
 @pytest.fixture
 def app_with_courses(mock_garmin_client):
-    """Create a FastMCP app with the courses tools registered."""
+    """Create an MCPServer app with the courses tools registered."""
     courses.configure(mock_garmin_client)
-    app = FastMCP("Test Courses")
+    app = MCPServer("Test Courses")
     app = courses.register_tools(app)
     return app
 
 
 def _result_text(result):
-    """Extract the text payload from a FastMCP call_tool result."""
-    return result[0][0].text
+    """Extract the text payload from an MCPServer call_tool result."""
+    return result.content[0].text
 
 
 # --- get_courses ----------------------------------------------------------

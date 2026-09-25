@@ -16,7 +16,7 @@ import logging
 
 import pytest
 from unittest.mock import Mock
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import (
     devices,
@@ -46,9 +46,9 @@ from tests.fixtures.garmin_responses import (
 # Devices module tests
 @pytest.fixture
 def app_with_devices(mock_garmin_client):
-    """Create FastMCP app with devices tools registered"""
+    """Create MCPServer app with devices tools registered"""
     devices.configure(mock_garmin_client)
-    app = FastMCP("Test Devices")
+    app = MCPServer("Test Devices")
     app = devices.register_tools(app)
     return app
 
@@ -102,7 +102,7 @@ async def test_get_device_settings_default_device_missing(app_with_devices, mock
     """When no last-used device exists, returns a clear error string."""
     mock_garmin_client.get_device_last_used.return_value = None
     result = await app_with_devices.call_tool("get_device_settings", {})
-    text = result[0][0].text
+    text = result.content[0].text
     assert "No default device found" in text
     mock_garmin_client.get_device_settings.assert_not_called()
 
@@ -146,9 +146,9 @@ async def test_get_device_alarms_tool(app_with_devices, mock_garmin_client):
 # Weight Management module tests
 @pytest.fixture
 def app_with_weight(mock_garmin_client):
-    """Create FastMCP app with weight_management tools registered"""
+    """Create MCPServer app with weight_management tools registered"""
     weight_management.configure(mock_garmin_client)
-    app = FastMCP("Test Weight Management")
+    app = MCPServer("Test Weight Management")
     app = weight_management.register_tools(app)
     return app
 
@@ -219,9 +219,9 @@ async def test_add_weigh_in_with_timestamps_tool(app_with_weight, mock_garmin_cl
 # User Profile module tests
 @pytest.fixture
 def app_with_user_profile(mock_garmin_client):
-    """Create FastMCP app with user_profile tools registered"""
+    """Create MCPServer app with user_profile tools registered"""
     user_profile.configure(mock_garmin_client)
-    app = FastMCP("Test User Profile")
+    app = MCPServer("Test User Profile")
     app = user_profile.register_tools(app)
     return app
 
@@ -301,7 +301,7 @@ async def test_get_heart_rate_zones_for_sport(app_with_user_profile, mock_garmin
 
     result = await app_with_user_profile.call_tool("get_heart_rate_zones", {"sport": "cycling"})
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data == HEART_RATE_ZONES[1]
     mock_garmin_client.connectapi.assert_called_once_with("/biometric-service/heartRateZones")
 
@@ -335,7 +335,7 @@ async def test_set_heart_rate_zones_custom_cycling_read_modify_write(
         },
     )
 
-    assert json.loads(result[0][0].text) == confirmed
+    assert json.loads(result.content[0].text) == confirmed
     payload = mock_garmin_client.client.request.call_args.kwargs["json"]
     assert payload == [{**confirmed, "changeState": "CHANGED"}]
     assert payload[0]["sport"] == "CYCLING"
@@ -360,7 +360,7 @@ async def test_set_heart_rate_zones_partial_update_preserves_other_fields(
         "set_heart_rate_zones", {"sport": "cycling", "max_hr": 204}
     )
 
-    assert json.loads(result[0][0].text) == confirmed
+    assert json.loads(result.content[0].text) == confirmed
     written = mock_garmin_client.client.request.call_args.kwargs["json"][0]
     assert written["zone1Floor"] == HEART_RATE_ZONES[1]["zone1Floor"]
     assert written["trainingMethod"] == HEART_RATE_ZONES[1]["trainingMethod"]
@@ -401,7 +401,7 @@ async def test_set_heart_rate_zones_rejects_invalid_boundaries(
         "set_heart_rate_zones", {"sport": "cycling", **arguments}
     )
 
-    assert error in result[0][0].text
+    assert error in result.content[0].text
     mock_garmin_client.client.request.assert_not_called()
 
 
@@ -419,7 +419,7 @@ async def test_set_heart_rate_zones_new_sport_inherits_default(
         "set_heart_rate_zones", {"sport": "running", "max_hr": 205}
     )
 
-    assert json.loads(result[0][0].text) == confirmed
+    assert json.loads(result.content[0].text) == confirmed
     written = mock_garmin_client.client.request.call_args.kwargs["json"][0]
     assert written["sport"] == "RUNNING"
     assert written["zone1Floor"] == HEART_RATE_ZONES[0]["zone1Floor"]
@@ -429,16 +429,16 @@ async def test_set_heart_rate_zones_new_sport_inherits_default(
 async def test_set_heart_rate_zones_requires_an_update(app_with_user_profile, mock_garmin_client):
     result = await app_with_user_profile.call_tool("set_heart_rate_zones", {"sport": "cycling"})
 
-    assert "No fields to update" in result[0][0].text
+    assert "No fields to update" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
 # Data Management module tests
 @pytest.fixture
 def app_with_data_management(mock_garmin_client):
-    """Create FastMCP app with data_management tools registered"""
+    """Create MCPServer app with data_management tools registered"""
     data_management.configure(mock_garmin_client)
-    app = FastMCP("Test Data Management")
+    app = MCPServer("Test Data Management")
     app = data_management.register_tools(app)
     return app
 
@@ -503,9 +503,9 @@ async def test_add_hydration_data_tool(app_with_data_management, mock_garmin_cli
 # Gear Management module tests
 @pytest.fixture
 def app_with_gear(mock_garmin_client):
-    """Create FastMCP app with gear_management tools registered"""
+    """Create MCPServer app with gear_management tools registered"""
     gear_management.configure(mock_garmin_client)
-    app = FastMCP("Test Gear Management")
+    app = MCPServer("Test Gear Management")
     app = gear_management.register_tools(app)
     return app
 
@@ -524,7 +524,7 @@ async def test_get_gear_tool(app_with_gear, mock_garmin_client):
     result = await app_with_gear.call_tool("get_gear", {})
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     gear_by_uuid = {item["uuid"]: item for item in payload["gear"]}
     assert (
         gear_by_uuid["8abfc40d71fb4860bce19072b6c79644"]["notes"]
@@ -555,7 +555,7 @@ async def test_get_gear_tool_preserves_empty_and_null_notes(
 
     result = await app_with_gear.call_tool("get_gear", {"include_stats": False})
 
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["gear"][0]["notes"] == notes_value
 
 
@@ -574,7 +574,7 @@ async def test_get_gear_tool_without_stats(
         result = await app_with_gear.call_tool("get_gear", {"include_stats": False})
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["gear_count"] == len(MOCK_GEAR)
     assert all(item["notes"] is None for item in payload["gear"])
     assert "Garmin v2 gear list unavailable: v2 unavailable" in caplog.text
@@ -609,9 +609,9 @@ async def test_remove_gear_from_activity_tool(app_with_gear, mock_garmin_client)
 # Women's Health module tests
 @pytest.fixture
 def app_with_womens_health(mock_garmin_client):
-    """Create FastMCP app with womens_health tools registered"""
+    """Create MCPServer app with womens_health tools registered"""
     womens_health.configure(mock_garmin_client)
-    app = FastMCP("Test Womens Health")
+    app = MCPServer("Test Womens Health")
     app = womens_health.register_tools(app)
     return app
 
@@ -675,5 +675,5 @@ async def test_get_menstrual_calendar_data_chunking(app_with_womens_health, mock
     assert calls[0].args == ("2026-01-01", "2026-04-02")
     assert calls[1].args == ("2026-04-03", "2026-06-30")
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data == [MOCK_MENSTRUAL_DATA, second_chunk]

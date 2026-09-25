@@ -1,14 +1,14 @@
 """
 Integration tests for health_wellness module MCP tools
 
-Tests all 22 health and wellness tools using FastMCP integration with mocked Garmin API responses.
+Tests all 22 health and wellness tools using MCPServer integration with mocked Garmin API responses.
 """
 import datetime
 import json
 
 import pytest
 from unittest.mock import Mock
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import health_wellness
 from tests.fixtures.garmin_responses import (
@@ -39,9 +39,9 @@ from tests.fixtures.garmin_responses import (
 
 @pytest.fixture
 def app_with_health_wellness(mock_garmin_client):
-    """Create FastMCP app with health_wellness tools registered"""
+    """Create MCPServer app with health_wellness tools registered"""
     health_wellness.configure(mock_garmin_client)
-    app = FastMCP("Test Health Wellness")
+    app = MCPServer("Test Health Wellness")
     app = health_wellness.register_tools(app)
     return app
 
@@ -99,7 +99,7 @@ async def test_get_stats_range_tool(app_with_health_wellness, mock_garmin_client
         {"start_date": yesterday, "end_date": today},
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     days = {d["date"]: d for d in data["days"]}
 
     past_day = days[yesterday]
@@ -130,7 +130,7 @@ async def test_get_stats_range_no_data_day(app_with_health_wellness, mock_garmin
         {"start_date": "2024-01-14", "end_date": "2024-01-15"},
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     days = {d["date"]: d for d in data["days"]}
     missing_day = days["2024-01-15"]
     assert missing_day["has_data"] is False
@@ -147,7 +147,7 @@ async def test_get_stats_range_rejects_oversized_range(app_with_health_wellness,
         "get_stats_range",
         {"start_date": "2024-01-01", "end_date": "2024-03-01"},
     )
-    assert "too large" in result[0][0].text
+    assert "too large" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -157,7 +157,7 @@ async def test_get_stats_range_rejects_inverted_range(app_with_health_wellness, 
         "get_stats_range",
         {"start_date": "2024-01-15", "end_date": "2024-01-01"},
     )
-    assert "end_date must be on or after start_date" in result[0][0].text
+    assert "end_date must be on or after start_date" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -168,7 +168,7 @@ async def test_get_stats_range_error(app_with_health_wellness, mock_garmin_clien
         "get_stats_range",
         {"start_date": "2024-01-14", "end_date": "2024-01-15"},
     )
-    assert "Error retrieving stats range" in result[0][0].text
+    assert "Error retrieving stats range" in result.content[0].text
 
 
 def _energy_balance_intake_resp(days):
@@ -236,7 +236,7 @@ async def test_get_energy_balance_derives_tdee(app_with_health_wellness, mock_ga
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-03"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert data["intake"]["days_included"] == 2
     assert data["intake"]["days_excluded_unlogged"] == 1
@@ -305,7 +305,7 @@ async def test_get_energy_balance_excludes_partial_and_no_data_days(
         "get_energy_balance",
         {"start_date": complete_date, "end_date": today},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert data["expenditure_garmin"]["days_included"] == 1
     assert data["expenditure_garmin"]["days_excluded"] == 2
@@ -335,7 +335,7 @@ async def test_get_energy_balance_surfaces_low_item_count_days(
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-03"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert data["intake"]["days_included"] == 2  # both logged days, including the low-count one
     assert data["intake"]["days_excluded_unlogged"] == 1
@@ -379,7 +379,7 @@ async def test_get_energy_balance_fits_trend_across_multiple_readings(
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-25"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     bc = data["body_composition"]
     assert bc["readings_used"] == 5
@@ -423,7 +423,7 @@ async def test_get_energy_balance_gates_out_short_span(app_with_health_wellness,
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-19"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert "body_composition" in data
     assert data["body_composition"]["readings_used"] == 3
@@ -457,7 +457,7 @@ async def test_get_energy_balance_gates_out_clustered_leverage(
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-24"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert "derived" not in data
     assert "cluster" in data["gate_note"]
@@ -492,7 +492,7 @@ async def test_get_energy_balance_uncertainty_formula_is_pinned(
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-24"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     bc = data["body_composition"]
     # weight_change_kg is rounded to 2dp, fat/lean to 3dp, by the tool itself.
@@ -521,7 +521,7 @@ async def test_get_energy_balance_single_body_comp_reading(app_with_health_welln
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-01"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "derived" not in data
     assert "body_composition_note" in data
 
@@ -542,7 +542,7 @@ async def test_get_energy_balance_chunks_expenditure_over_28_days(
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-02-05"},  # 36 days
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert mock_garmin_client.connectapi.call_count == 3
     assert data["expenditure_garmin"]["days_included"] == 2
     assert data["expenditure_garmin"]["mean_total_calories_per_day"] == 2550.0
@@ -554,7 +554,7 @@ async def test_get_energy_balance_rejects_oversized_range(app_with_health_wellne
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-04-01"},
     )
-    assert "too large" in result[0][0].text
+    assert "too large" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -564,7 +564,7 @@ async def test_get_energy_balance_rejects_inverted_range(app_with_health_wellnes
         "get_energy_balance",
         {"start_date": "2024-01-15", "end_date": "2024-01-01"},
     )
-    assert "end_date must be on or after start_date" in result[0][0].text
+    assert "end_date must be on or after start_date" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -580,7 +580,7 @@ async def test_get_energy_balance_no_usable_data(app_with_health_wellness, mock_
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-03"},
     )
-    assert "No usable data found" in result[0][0].text
+    assert "No usable data found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -590,7 +590,7 @@ async def test_get_energy_balance_error(app_with_health_wellness, mock_garmin_cl
         "get_energy_balance",
         {"start_date": "2024-01-01", "end_date": "2024-01-03"},
     )
-    assert "Error retrieving energy balance data" in result[0][0].text
+    assert "Error retrieving energy balance data" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -903,7 +903,7 @@ async def test_get_sleep_summary_range_tool(app_with_health_wellness, mock_garmi
     )
 
     assert result is not None
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["start_date"] == "2024-01-13"
     assert data["end_date"] == "2024-01-15"
     assert data["nights_requested"] == 3
@@ -939,7 +939,7 @@ async def test_get_sleep_summary_range_skips_nights_without_data(
         {"start_date": "2024-01-13", "end_date": "2024-01-15"},
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["nights_requested"] == 3
     assert data["nights_returned"] == 1
     assert data["nights"][0]["date"] == "2024-01-13"
@@ -954,13 +954,13 @@ async def test_get_sleep_summary_range_rejects_invalid_dates(
         "get_sleep_summary_range",
         {"start_date": "not-a-date", "end_date": "2024-01-15"},
     )
-    assert "Invalid date format" in result[0][0].text
+    assert "Invalid date format" in result.content[0].text
 
     result = await app_with_health_wellness.call_tool(
         "get_sleep_summary_range",
         {"start_date": "2024-01-15", "end_date": "2024-01-13"},
     )
-    assert "end_date must be on or after start_date" in result[0][0].text
+    assert "end_date must be on or after start_date" in result.content[0].text
 
     mock_garmin_client.get_sleep_data.assert_not_called()
 
@@ -974,7 +974,7 @@ async def test_get_sleep_summary_range_enforces_max_days(
         "get_sleep_summary_range",
         {"start_date": "2024-01-01", "end_date": "2024-04-15"},  # 106 days
     )
-    assert "too large" in result[0][0].text
+    assert "too large" in result.content[0].text
     mock_garmin_client.get_sleep_data.assert_not_called()
 
 
@@ -1276,7 +1276,7 @@ async def test_get_sleep_summary_handles_null_sleep_scores(app_with_health_welln
         "get_sleep_summary",
         {"date": "2024-01-15"},
     )
-    text = result[0][0].text
+    text = result.content[0].text
     assert "NoneType" not in text
     assert "Error" not in text
     assert "28800" in text  # the rest of the summary still surfaces
@@ -1306,7 +1306,7 @@ async def test_get_sleep_summary_handles_null_sleep_phases(app_with_health_welln
         "get_sleep_summary",
         {"date": "2024-01-15"},
     )
-    text = result[0][0].text
+    text = result.content[0].text
     assert "NoneType" not in text
     assert "Error" not in text
     data = json.loads(text)
@@ -1337,7 +1337,7 @@ async def test_get_sleep_summary_handles_partial_sleep_phases(app_with_health_we
         "get_sleep_summary",
         {"date": "2024-01-15"},
     )
-    text = result[0][0].text
+    text = result.content[0].text
     assert "NoneType" not in text
     data = json.loads(text)
     assert data["deep_sleep_percent"] == 25.0
@@ -1367,7 +1367,7 @@ async def test_get_body_battery_handles_null_activity_events(app_with_health_wel
         "get_body_battery",
         {"start_date": "2024-01-15", "end_date": "2024-01-15"},
     )
-    text = result[0][0].text
+    text = result.content[0].text
     assert "NoneType" not in text
     assert "Error" not in text
     assert "100" in text

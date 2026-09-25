@@ -8,16 +8,16 @@ import json
 from copy import deepcopy
 import pytest
 from unittest.mock import Mock, call
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import nutrition
 
 
 @pytest.fixture
 def app_with_nutrition(mock_garmin_client):
-    """Create FastMCP app with nutrition tools registered"""
+    """Create MCPServer app with nutrition tools registered"""
     nutrition.configure(mock_garmin_client)
-    app = FastMCP("Test Nutrition")
+    app = MCPServer("Test Nutrition")
     app = nutrition.register_tools(app)
     return app
 
@@ -57,7 +57,7 @@ async def test_get_nutrition_daily_food_log_empty(app_with_nutrition, mock_garmi
         "get_nutrition_daily_food_log",
         {"date": "2024-01-15"}
     )
-    assert "No food log data found" in result[0][0].text
+    assert "No food log data found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_get_nutrition_daily_food_log_error(app_with_nutrition, mock_garmi
         "get_nutrition_daily_food_log",
         {"date": "2024-01-15"}
     )
-    assert "Error retrieving food log data" in result[0][0].text
+    assert "Error retrieving food log data" in result.content[0].text
 
 
 # get_nutrition_summary_between_dates tests
@@ -119,7 +119,7 @@ async def test_get_nutrition_summary_between_dates(app_with_nutrition, mock_garm
         "/nutrition-service/food/logs/range",
         params={"startDate": "2024-01-14", "endDate": "2024-01-15"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["start_date"] == "2024-01-14"
     assert data["end_date"] == "2024-01-15"
 
@@ -145,7 +145,7 @@ async def test_get_nutrition_summary_between_dates_rejects_oversized_range(
         "get_nutrition_summary_between_dates",
         {"start_date": "2024-01-01", "end_date": "2024-04-01"},
     )
-    assert "too large" in result[0][0].text
+    assert "too large" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -157,7 +157,7 @@ async def test_get_nutrition_summary_between_dates_rejects_inverted_range(
         "get_nutrition_summary_between_dates",
         {"start_date": "2024-01-15", "end_date": "2024-01-01"},
     )
-    assert "end_date must be on or after start_date" in result[0][0].text
+    assert "end_date must be on or after start_date" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -168,7 +168,7 @@ async def test_get_nutrition_summary_between_dates_empty(app_with_nutrition, moc
         "get_nutrition_summary_between_dates",
         {"start_date": "2024-01-14", "end_date": "2024-01-15"},
     )
-    assert "No nutrition data found" in result[0][0].text
+    assert "No nutrition data found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -178,7 +178,7 @@ async def test_get_nutrition_summary_between_dates_error(app_with_nutrition, moc
         "get_nutrition_summary_between_dates",
         {"start_date": "2024-01-14", "end_date": "2024-01-15"},
     )
-    assert "Error retrieving nutrition summary" in result[0][0].text
+    assert "Error retrieving nutrition summary" in result.content[0].text
 
 
 # get_nutrition_daily_meals tests
@@ -212,7 +212,7 @@ async def test_get_nutrition_daily_meals_empty(app_with_nutrition, mock_garmin_c
         "get_nutrition_daily_meals",
         {"date": "2024-01-15"}
     )
-    assert "No meal data found" in result[0][0].text
+    assert "No meal data found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ async def test_get_nutrition_daily_meals_error(app_with_nutrition, mock_garmin_c
         "get_nutrition_daily_meals",
         {"date": "2024-01-15"}
     )
-    assert "Error retrieving meal data" in result[0][0].text
+    assert "Error retrieving meal data" in result.content[0].text
 
 
 # get_nutrition_daily_settings tests
@@ -254,7 +254,7 @@ async def test_get_nutrition_daily_settings_empty(app_with_nutrition, mock_garmi
         "get_nutrition_daily_settings",
         {"date": "2024-01-15"}
     )
-    assert "No nutrition settings found" in result[0][0].text
+    assert "No nutrition settings found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -265,7 +265,7 @@ async def test_get_nutrition_daily_settings_error(app_with_nutrition, mock_garmi
         "get_nutrition_daily_settings",
         {"date": "2024-01-15"}
     )
-    assert "Error retrieving nutrition settings" in result[0][0].text
+    assert "Error retrieving nutrition settings" in result.content[0].text
 
 
 # get_custom_foods tests
@@ -319,7 +319,7 @@ async def test_get_custom_foods_empty(app_with_nutrition, mock_garmin_client):
     """Test get_custom_foods tool with no results"""
     mock_garmin_client.connectapi.return_value = None
     result = await app_with_nutrition.call_tool("get_custom_foods", {})
-    assert "No custom foods found" in result[0][0].text
+    assert "No custom foods found" in result.content[0].text
 
 
 # get_custom_food_serving_units tests
@@ -341,7 +341,7 @@ async def test_get_custom_food_serving_units_error(app_with_nutrition, mock_garm
     """Test get_custom_food_serving_units handles errors"""
     mock_garmin_client.connectapi.side_effect = Exception("API error")
     result = await app_with_nutrition.call_tool("get_custom_food_serving_units", {})
-    assert "Error retrieving serving units" in result[0][0].text
+    assert "Error retrieving serving units" in result.content[0].text
 
 
 # create_custom_food tests
@@ -389,7 +389,7 @@ async def test_create_custom_food_minimal(app_with_nutrition, mock_garmin_client
         "create_custom_food",
         {"food_name": "Simple Food", "calories": 100}
     )
-    assert "Custom food created" in result[0][0].text
+    assert "Custom food created" in result.content[0].text
     call_args = mock_garmin_client.client.put.call_args
     payload = call_args[1]["json"]
     # Optional fields should NOT be present in the payload
@@ -406,7 +406,7 @@ async def test_create_custom_food_error(app_with_nutrition, mock_garmin_client):
         "create_custom_food",
         {"food_name": "Test", "calories": 100}
     )
-    assert "Error creating custom food" in result[0][0].text
+    assert "Error creating custom food" in result.content[0].text
 
 
 # update_custom_food tests
@@ -470,7 +470,7 @@ async def test_update_custom_food_204(app_with_nutrition, mock_garmin_client):
             "calories": 100,
         }
     )
-    assert "Custom food updated" in result[0][0].text
+    assert "Custom food updated" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -486,7 +486,7 @@ async def test_update_custom_food_error(app_with_nutrition, mock_garmin_client):
             "calories": 100,
         }
     )
-    assert "Error updating custom food" in result[0][0].text
+    assert "Error updating custom food" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -702,7 +702,7 @@ async def test_log_food_falls_back_to_snacks(app_with_nutrition, mock_garmin_cli
             "fat": 3,
         }
     )
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     payload = mock_garmin_client.client.put.call_args[1]["json"]
     assert payload["quickAddItems"][0]["mealId"] == 20252  # SNACKS
     assert payload["quickAddItems"][0]["mealTime"] == "10:00:00"
@@ -725,7 +725,7 @@ async def test_log_food_error(app_with_nutrition, mock_garmin_client):
             "fat": 2,
         }
     )
-    assert "Error logging food" in result[0][0].text
+    assert "Error logging food" in result.content[0].text
 
 
 # log_custom_food tests
@@ -779,7 +779,7 @@ async def test_log_custom_food_falls_back_to_snacks(app_with_nutrition, mock_gar
             "serving_id": "srv456",
         }
     )
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     payload = mock_garmin_client.client.put.call_args[1]["json"]
     assert payload["foodLogItems"][0]["mealId"] == 20252  # SNACKS
     assert payload["foodLogItems"][0]["servingQty"] == 1
@@ -799,7 +799,7 @@ async def test_log_custom_food_error(app_with_nutrition, mock_garmin_client):
             "serving_id": "srv456",
         }
     )
-    assert "Error logging food" in result[0][0].text
+    assert "Error logging food" in result.content[0].text
 
 
 # delete_custom_food tests
@@ -813,8 +813,8 @@ async def test_delete_custom_food(app_with_nutrition, mock_garmin_client):
         "delete_custom_food",
         {"food_id": food_id},
     )
-    assert "success" in result[0][0].text
-    assert food_id in result[0][0].text
+    assert "success" in result.content[0].text
+    assert food_id in result.content[0].text
     mock_garmin_client.client.delete.assert_called_once_with(
         "connectapi", f"/nutrition-service/customFood/{food_id}", api=True
     )
@@ -828,7 +828,7 @@ async def test_delete_custom_food_error(app_with_nutrition, mock_garmin_client):
         "delete_custom_food",
         {"food_id": "08b27145e29d41479e36d8d3788fcccf"},
     )
-    assert "Error deleting custom food" in result[0][0].text
+    assert "Error deleting custom food" in result.content[0].text
 
 
 # delete_food_log tests
@@ -841,8 +841,8 @@ async def test_delete_food_log(app_with_nutrition, mock_garmin_client):
         "delete_food_log",
         {"log_id": "581f7dc8797f421f8d7eea83e5d2c939", "meal_date": "2024-01-15"}
     )
-    assert "success" in result[0][0].text
-    assert "581f7dc8797f421f8d7eea83e5d2c939" in result[0][0].text
+    assert "success" in result.content[0].text
+    assert "581f7dc8797f421f8d7eea83e5d2c939" in result.content[0].text
     mock_garmin_client.client.delete.assert_called_once_with(
         "connectapi", "/nutrition-service/food/logs/2024-01-15",
         json={"logIds": ["581f7dc8797f421f8d7eea83e5d2c939"]}, api=True
@@ -857,7 +857,7 @@ async def test_delete_food_log_error(app_with_nutrition, mock_garmin_client):
         "delete_food_log",
         {"log_id": "99001", "meal_date": "2024-01-15"}
     )
-    assert "Error deleting food log" in result[0][0].text
+    assert "Error deleting food log" in result.content[0].text
 
 
 # upsert_and_log tests
@@ -889,7 +889,7 @@ async def test_upsert_and_log_existing_food(app_with_nutrition, mock_garmin_clie
             "calories": 100,
         }
     )
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     # create_custom_food should NOT have been called
     mock_garmin_client.client.put.assert_called_once()
     payload = mock_garmin_client.client.put.call_args[1]["json"]
@@ -930,7 +930,7 @@ async def test_upsert_and_log_creates_new_food(app_with_nutrition, mock_garmin_c
             "protein": 20,
         }
     )
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     assert mock_garmin_client.client.put.call_count == 2
     log_payload = mock_garmin_client.client.put.call_args_list[1][1]["json"]
     assert log_payload["foodLogItems"][0]["foodId"] == "food999"
@@ -964,7 +964,7 @@ async def test_upsert_and_log_recovers_ids_after_bodyless_create(app_with_nutrit
             "calories": 200,
         }
     )
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     log_payload = mock_garmin_client.client.put.call_args_list[1][1]["json"]
     assert log_payload["foodLogItems"][0]["foodId"] == "food001"
     assert log_payload["foodLogItems"][0]["servingId"] == "srv001"
@@ -993,7 +993,7 @@ async def test_upsert_and_log_error(app_with_nutrition, mock_garmin_client):
             "calories": 100,
         }
     )
-    assert "Error in upsert_and_log" in result[0][0].text
+    assert "Error in upsert_and_log" in result.content[0].text
 
 
 # Regression tests for Bug 1 and Bug 2
@@ -1017,8 +1017,8 @@ async def test_log_food_no_attribute_error_on_success(app_with_nutrition, mock_g
             "fat": 3,
         }
     )
-    assert "Error" not in result[0][0].text
-    assert "logId" in result[0][0].text
+    assert "Error" not in result.content[0].text
+    assert "logId" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -1031,8 +1031,8 @@ async def test_delete_food_log_accepts_hex_uuid(app_with_nutrition, mock_garmin_
         "delete_food_log",
         {"log_id": hex_log_id, "meal_date": "2024-01-15"}
     )
-    assert "success" in result[0][0].text
-    assert hex_log_id in result[0][0].text
+    assert "success" in result.content[0].text
+    assert hex_log_id in result.content[0].text
     mock_garmin_client.client.delete.assert_called_once_with(
         "connectapi", "/nutrition-service/food/logs/2024-01-15",
         json={"logIds": [hex_log_id]}, api=True
@@ -1071,7 +1071,7 @@ async def test_set_nutrition_daily_settings_updates_all_fields(app_with_nutritio
         "set_nutrition_daily_settings",
         {"date": "2024-01-15", "calorie_goal": 1800, "carbs_grams": 200, "fat_grams": 60, "protein_grams": 140},
     )
-    assert json.loads(result[0][0].text) == {
+    assert json.loads(result.content[0].text) == {
         "status": "updated", "date": "2024-01-15", "calorie_goal": 1850,
         "carbs_grams": 205, "fat_grams": 60, "protein_grams": 140,
     }
@@ -1105,7 +1105,7 @@ async def test_set_nutrition_daily_settings_partial_update(
     result = await app_with_nutrition.call_tool(
         "set_nutrition_daily_settings", {"date": "2024-01-15", **overrides}
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["calorie_goal"] == 1950
     assert data["carbs_grams"] == stored["macroGoals"]["carbs"]
     assert mock_garmin_client.client.put.call_args.kwargs["json"] == expected
@@ -1120,8 +1120,8 @@ async def test_set_nutrition_daily_settings_unverified_write(app_with_nutrition,
     result = await app_with_nutrition.call_tool(
         "set_nutrition_daily_settings", {"date": "2024-01-15", "calorie_goal": 1900}
     )
-    assert "could not verify" in result[0][0].text
-    assert '"status": "updated"' not in result[0][0].text
+    assert "could not verify" in result.content[0].text
+    assert '"status": "updated"' not in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -1131,7 +1131,7 @@ async def test_set_nutrition_daily_settings_no_fields_provided(app_with_nutritio
         "set_nutrition_daily_settings",
         {"date": "2024-01-15"},
     )
-    assert "No fields to update" in result[0][0].text
+    assert "No fields to update" in result.content[0].text
     mock_garmin_client.connectapi.assert_not_called()
 
 
@@ -1144,7 +1144,7 @@ async def test_set_nutrition_daily_settings_no_current_data(app_with_nutrition, 
         "set_nutrition_daily_settings",
         {"date": "2024-01-15", "calorie_goal": 1800},
     )
-    assert "Could not read current" in result[0][0].text
+    assert "Could not read current" in result.content[0].text
     mock_garmin_client.client.put.assert_not_called()
 
 
@@ -1158,8 +1158,8 @@ async def test_set_nutrition_daily_settings_api_error(app_with_nutrition, mock_g
         "set_nutrition_daily_settings",
         {"date": "2024-01-15", "calorie_goal": 1800},
     )
-    assert "Error updating nutrition settings" in result[0][0].text
-    assert "403" in result[0][0].text
+    assert "Error updating nutrition settings" in result.content[0].text
+    assert "403" in result.content[0].text
 
 
 # search_foods tests
@@ -1202,7 +1202,7 @@ async def test_search_foods_returns_results(app_with_nutrition, mock_garmin_clie
         "search_foods",
         {"query": "Cheerios & Oats/é"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["count"] == 1
     assert data["results"][0]["name"] == "Cheerios"
     assert data["results"][0]["source"] == "FATSECRET"
@@ -1230,7 +1230,7 @@ async def test_search_foods_empty_response(app_with_nutrition, mock_garmin_clien
         "search_foods",
         {"query": "xyzunknownfood"},
     )
-    assert "No foods found" in result[0][0].text
+    assert "No foods found" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -1242,7 +1242,7 @@ async def test_search_foods_error(app_with_nutrition, mock_garmin_client):
         "search_foods",
         {"query": "Cheerios"},
     )
-    assert "Error searching foods" in result[0][0].text
+    assert "Error searching foods" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -1300,7 +1300,7 @@ async def test_set_nutrition_settings_handles_sparse_macros(
     result = await app_with_nutrition.call_tool(
         "set_nutrition_daily_settings", {"date": "2024-01-15", "protein_grams": 130}
     )
-    assert json.loads(result[0][0].text)["protein_grams"] == 130
+    assert json.loads(result.content[0].text)["protein_grams"] == 130
     expected = deepcopy(current)
     expected["macroGoals"] = {**(macro_goals or {}), "protein": 130}
     assert mock_garmin_client.client.put.call_args.kwargs["json"] == expected
@@ -1314,5 +1314,5 @@ async def test_set_nutrition_settings_rejects_invalid_macros(app_with_nutrition,
     result = await app_with_nutrition.call_tool(
         "set_nutrition_daily_settings", {"date": "2024-01-15", "protein_grams": 130}
     )
-    assert "cannot apply update" in result[0][0].text
+    assert "cannot apply update" in result.content[0].text
     mock_garmin_client.client.put.assert_not_called()

@@ -4,7 +4,7 @@ Shared pytest fixtures for Garmin MCP testing
 import pytest
 from unittest.mock import Mock
 from datetime import datetime, timedelta
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 
 @pytest.fixture
@@ -162,20 +162,20 @@ def sample_training_status():
 
 def create_test_app(module, mock_client):
     """
-    Helper function to create a FastMCP app with a specific module registered
+    Helper function to create an MCPServer app with a specific module registered
 
     Args:
         module: The module to register (e.g., health_wellness)
         mock_client: Mock Garmin client to configure the module with
 
     Returns:
-        FastMCP app instance with tools registered
+        MCPServer app instance with tools registered
     """
     # Configure the module with mock client
     module.configure(mock_client)
 
     # Create app and register tools
-    app = FastMCP("Test Garmin MCP")
+    app = MCPServer("Test Garmin MCP")
     app = module.register_tools(app)
 
     return app
@@ -184,7 +184,7 @@ def create_test_app(module, mock_client):
 @pytest.fixture
 def app_factory(mock_garmin_client):
     """
-    Factory fixture to create FastMCP apps with different modules
+    Factory fixture to create MCPServer apps with different modules
 
     Usage:
         app = app_factory(health_wellness)

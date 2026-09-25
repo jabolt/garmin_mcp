@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from fitparse.profile import MESSAGE_TYPES
 from fitparse.records import DataMessage, FieldData
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import activity_analysis
 from garmin_mcp.activity_analysis import (
@@ -30,9 +30,9 @@ ACTIVITY_ID = 22041393449
 
 @pytest.fixture
 def app_with_activity_analysis(mock_garmin_client):
-    """Create FastMCP app with activity_analysis tools registered"""
+    """Create MCPServer app with activity_analysis tools registered"""
     activity_analysis.configure(mock_garmin_client)
-    app = FastMCP("Test Activity Analysis")
+    app = MCPServer("Test Activity Analysis")
     app = activity_analysis.register_tools(app)
     return app
 
@@ -137,7 +137,7 @@ async def test_get_activity_fit_messages_preserves_all_message_types_and_fields(
         ACTIVITY_ID,
         dl_fmt=Garmin.ActivityDownloadFormat.ORIGINAL,
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["source"] == "garmin_original_fit"
     assert data["message_counts"] == {"exercise_title": 1, "set": 1}
     assert [message["type"] for message in data["messages"]] == [
@@ -208,7 +208,7 @@ async def test_get_activity_fit_messages_resolves_standard_contextual_enums(
             "get_activity_fit_messages", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     fields_by_message = [
         {field["name"]: field for field in message["fields"]}
         for message in data["messages"]
@@ -243,7 +243,7 @@ async def test_get_activity_fit_messages_omits_records_by_default(
             "get_activity_fit_messages", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["message_counts"] == {"record": 2, "set": 1}
     assert data["returned_message_counts"] == {"set": 1}
     assert [message["type"] for message in data["messages"]] == ["set"]
@@ -278,7 +278,7 @@ async def test_get_activity_fit_messages_paginates_records(
             },
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["record_stream"] == {
         "included": True,
         "total_count": 3,
@@ -314,7 +314,7 @@ async def test_get_activity_fit_messages_filters_returned_types_but_keeps_invent
             {"activity_id": ACTIVITY_ID, "message_types": ["SET"]},
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["message_counts"] == {"session": 1, "set": 1}
     assert data["returned_message_counts"] == {"set": 1}
     assert [message["type"] for message in data["messages"]] == ["set"]
@@ -338,7 +338,7 @@ async def test_get_activity_fit_messages_rejects_unbounded_message_limit(
             },
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["error"] == "message_limit must be between 1 and 5000"
 
 
@@ -364,7 +364,7 @@ async def test_get_activity_fit_messages_omits_other_high_frequency_types_by_def
             "get_activity_fit_messages", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert [message["type"] for message in data["messages"]] == ["session"]
     assert data["message_counts"]["unknown_233"] == 101
     assert data["omitted_high_frequency_message_types"]["unknown_233"]["count"] == 101
@@ -399,7 +399,7 @@ async def test_get_activity_fit_data_empty_response(app_with_activity_analysis, 
     )
 
     assert result is not None
-    text = result[0][0].text
+    text = result.content[0].text
     assert "No FIT data" in text
 
 
@@ -413,7 +413,7 @@ async def test_get_activity_fit_data_none_response(app_with_activity_analysis, m
     )
 
     assert result is not None
-    text = result[0][0].text
+    text = result.content[0].text
     assert "No FIT data" in text or "Error" in text
 
 
@@ -427,7 +427,7 @@ async def test_get_activity_fit_data_error_handling(app_with_activity_analysis, 
     )
 
     assert result is not None
-    text = result[0][0].text
+    text = result.content[0].text
     assert "Error" in text
 
 
@@ -459,7 +459,7 @@ async def test_get_activity_fit_data_session_fields(app_with_activity_analysis, 
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert data["session"]["sport"] == "cycling"
@@ -504,7 +504,7 @@ async def test_get_activity_fit_data_shift_events(app_with_activity_analysis, mo
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert len(data["shifts"]) == 1
@@ -535,7 +535,7 @@ async def test_get_activity_fit_data_proactive_shift(app_with_activity_analysis,
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert data["shifts"][0]["quality"] == "proactive"
@@ -562,7 +562,7 @@ async def test_get_activity_fit_data_shift_summary(app_with_activity_analysis, m
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     summary = data["shift_summary"]
@@ -591,7 +591,7 @@ async def test_get_activity_fit_data_records_excluded_by_default(app_with_activi
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
     assert "records" not in data
 
@@ -622,7 +622,7 @@ async def test_get_activity_fit_data_records_included_when_requested(app_with_ac
             {"activity_id": ACTIVITY_ID, "include_records": True}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert "records" in data
@@ -656,7 +656,7 @@ async def test_get_activity_fit_data_power_balance(app_with_activity_analysis, m
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert data["session"]["avg_left_power_pct"] == 47.0
@@ -680,7 +680,7 @@ async def test_get_activity_fit_data_no_shifts(app_with_activity_analysis, mock_
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     assert data["shift_summary"]["total_shifts"] == 0
@@ -709,7 +709,7 @@ async def test_get_activity_fit_data_variability_index_session(app_with_activity
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
     assert "variability_index" in data["session"]
     assert data["session"]["variability_index"] == round(210 / 175, 3)
@@ -732,7 +732,7 @@ async def test_get_activity_fit_data_variability_index_lap(app_with_activity_ana
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
     assert len(data["laps"]) == 1
     assert data["laps"][0]["variability_index"] == round(240 / 200, 3)
@@ -761,7 +761,7 @@ async def test_get_activity_fit_data_lap_torque_and_smoothness(app_with_activity
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
     lap = data["laps"][0]
     assert lap["avg_left_torque_effectiveness_pct"] == 82.5
@@ -803,7 +803,7 @@ async def test_get_activity_fit_data_shift_terrain_classification(app_with_activ
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    text = result[0][0].text
+    text = result.content[0].text
     data = json.loads(text)
 
     # Each shift should have grade_at_shift_pct
@@ -1048,7 +1048,7 @@ async def test_fit_no_hrv_messages_produces_no_hrv_key(app_with_activity_analysi
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "hrv" not in data
 
 
@@ -1065,7 +1065,7 @@ async def test_fit_hrv_summary_present_with_enough_intervals(app_with_activity_a
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "hrv" in data
     hrv = data["hrv"]
     assert "rmssd_ms" in hrv
@@ -1089,7 +1089,7 @@ async def test_fit_hrv_sentinel_values_filtered(app_with_activity_analysis, mock
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "hrv" in data
     assert data["hrv"]["rr_count"] == 20
 
@@ -1107,7 +1107,7 @@ async def test_fit_hrv_not_produced_below_minimum_samples(app_with_activity_anal
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "hrv" not in data
 
 
@@ -1124,7 +1124,7 @@ async def test_fit_hrv_rr_intervals_excluded_by_default(app_with_activity_analys
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "rr_intervals_seconds" not in data
     assert "hrv" in data  # summary is still present
 
@@ -1148,7 +1148,7 @@ async def test_fit_hrv_rr_intervals_included_when_records_requested(app_with_act
             {"activity_id": ACTIVITY_ID, "include_records": True}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "rr_intervals_seconds" in data
     assert len(data["rr_intervals_seconds"]) == 20
     assert data["rr_intervals_seconds"][0]["rr_seconds"] == 0.65
@@ -1186,7 +1186,7 @@ async def test_fit_hrv_per_lap_bucketing(app_with_activity_analysis, mock_garmin
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert len(data["laps"]) == 2
     assert "hrv" in data["laps"][0], "Lap 1 should have HRV"
     assert "hrv" in data["laps"][1], "Lap 2 should have HRV"
@@ -1224,7 +1224,7 @@ async def test_fit_hrv_lap_below_minimum_gets_no_hrv(app_with_activity_analysis,
             "get_activity_fit_data", {"activity_id": ACTIVITY_ID}
         )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert len(data["laps"]) == 2
     assert "hrv" in data["laps"][0]
     assert "hrv" not in data["laps"][1]
@@ -1295,7 +1295,7 @@ async def test_set_fit_download_dir_persists(app_with_activity_analysis, monkeyp
     result = await app_with_activity_analysis.call_tool(
         "set_fit_download_dir", {"path": str(target)}
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert data["download_dir"] == os.path.abspath(str(target))
     assert os.path.isdir(str(target))  # directory was created
@@ -1327,7 +1327,7 @@ async def test_download_activity_file_fit_saves_file(
         "download_activity_file",
         {"activity_id": ACTIVITY_ID, "output_dir": str(tmp_path)},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     expected = tmp_path / f"{ACTIVITY_ID}.fit"
     assert expected.read_bytes() == fit_bytes
@@ -1357,7 +1357,7 @@ async def test_download_activity_file_other_formats_write_raw_bytes(
         "download_activity_file",
         {"activity_id": ACTIVITY_ID, "format": fmt, "output_dir": str(tmp_path)},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     expected = tmp_path / f"{ACTIVITY_ID}.{fmt}"
     assert expected.read_bytes() == payload
@@ -1375,7 +1375,7 @@ async def test_download_activity_file_invalid_format(
         "download_activity_file",
         {"activity_id": ACTIVITY_ID, "format": "pdf", "output_dir": str(tmp_path)},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert "Invalid format" in data["error"]
     assert "fit" in data["valid_formats"]
@@ -1392,7 +1392,7 @@ async def test_download_activity_file_needs_setup(
     result = await app_with_activity_analysis.call_tool(
         "download_activity_file", {"activity_id": ACTIVITY_ID}
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert data["status"] == "needs_setup"
     assert "suggested_default" in data
@@ -1409,7 +1409,7 @@ async def test_download_activity_file_none_response(
         "download_activity_file",
         {"activity_id": ACTIVITY_ID, "output_dir": str(tmp_path)},
     )
-    text = result[0][0].text
+    text = result.content[0].text
 
     assert "No fit data returned" in text
 
@@ -1429,7 +1429,7 @@ async def test_download_activity_file_fit_extraction_failure(
         "download_activity_file",
         {"activity_id": ACTIVITY_ID, "output_dir": str(tmp_path)},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
 
     assert "error" in data
     assert "first_16_bytes_hex" in data["debug"]

@@ -13,7 +13,7 @@ import json
 
 import pytest
 from garminconnect import GarminConnectConnectionError, GarminConnectTooManyRequestsError
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import nutrition
 
@@ -28,7 +28,7 @@ MOCK_MEALS = {
 @pytest.fixture
 def app_with_nutrition(mock_garmin_client):
     nutrition.configure(mock_garmin_client)
-    return nutrition.register_tools(FastMCP("Test Nutrition Region"))
+    return nutrition.register_tools(MCPServer("Test Nutrition Region"))
 
 
 def _region_codes(obj) -> list:
@@ -121,7 +121,7 @@ async def test_upsert_and_log_uses_configured_region_for_create_and_log(
         "upsert_and_log",
         {"meal_date": "2024-01-15", "meal_time": "12:00:00", "food_name": "New Food",
          "calories": 200})
-    assert "Food logged successfully" in result[0][0].text
+    assert "Food logged successfully" in result.content[0].text
     # one regionCode in the create payload, one in the log payload
     assert _region_codes(_put_payloads(mock_garmin_client)) == ["IE", "IE"]
 
@@ -150,7 +150,7 @@ async def test_search_foods_sends_region_and_language(app_with_nutrition, mock_g
         params={"searchExpression": "Greggs", "start": 0, "limit": 20,
                 "regionCode": "GB", "languageCode": "en"},
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["catalogue_region"] == "GB"
     assert data["results"][0]["region"] == "GB"
 
@@ -172,7 +172,7 @@ async def test_search_foods_falls_back_when_region_is_rejected(app_with_nutritio
     assert mock_garmin_client.connectapi.call_count == 2
     assert mock_garmin_client.connectapi.call_args_list[1][1]["params"] == {
         "searchExpression": "Greggs", "start": 0, "limit": 20}
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["count"] == 1
     assert data["catalogue_region"] is None       # tells the caller the region was not applied
 
@@ -187,7 +187,7 @@ async def test_search_foods_does_not_retry_on_other_errors(app_with_nutrition, m
     mock_garmin_client.connectapi.side_effect = error
     result = await app_with_nutrition.call_tool("search_foods", {"query": "Greggs"})
     assert mock_garmin_client.connectapi.call_count == 1
-    assert "Error" in result[0][0].text
+    assert "Error" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -208,10 +208,10 @@ async def test_search_foods_fallback_works_through_the_real_client_proxy():
 
     fake = FakeGarmin()
     nutrition.configure(_GarminProxy(fake))
-    app = nutrition.register_tools(FastMCP("Test Nutrition Proxy"))
+    app = nutrition.register_tools(MCPServer("Test Nutrition Proxy"))
     result = await app.call_tool("search_foods", {"query": "Greggs"})
     assert [("regionCode" in c) for c in fake.calls] == [True, False]
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["count"] == 1 and data["catalogue_region"] is None
 
 

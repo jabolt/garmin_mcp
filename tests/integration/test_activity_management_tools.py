@@ -1,12 +1,12 @@
 """
 Integration tests for activity_management module MCP tools
 
-Tests activity management tools using FastMCP integration with mocked Garmin API responses.
+Tests activity management tools using MCPServer integration with mocked Garmin API responses.
 """
 import json
 import pytest
 from unittest.mock import Mock
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import activity_management
 from tests.fixtures.garmin_responses import (
@@ -21,9 +21,9 @@ from tests.fixtures.garmin_responses import (
 
 @pytest.fixture
 def app_with_activity_management(mock_garmin_client):
-    """Create FastMCP app with activity_management tools registered"""
+    """Create MCPServer app with activity_management tools registered"""
     activity_management.configure(mock_garmin_client)
-    app = FastMCP("Test Activity Management")
+    app = MCPServer("Test Activity Management")
     app = activity_management.register_tools(app)
     return app
 
@@ -147,7 +147,7 @@ async def test_set_activity_name_tool(app_with_activity_management, mock_garmin_
         activity_id, "Morning Run - Easy"
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["success"] is True
     assert data["activity_id"] == activity_id
     assert data["activity_name"] == "Morning Run - Easy"
@@ -165,7 +165,7 @@ async def test_set_activity_name_tool_rejects_blank_name(
 
     assert result is not None
     mock_garmin_client.set_activity_name.assert_not_called()
-    assert result[0][0].text == "Activity name cannot be empty"
+    assert result.content[0].text == "Activity name cannot be empty"
 
 
 # ── Activity write tools ──────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ async def test_set_activity_type_tool(app_with_activity_management, mock_garmin_
     mock_garmin_client.set_activity_type.assert_called_once_with(
         12345678901, 3, "hiking", 17
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["success"] is True
     assert data["type_key"] == "hiking"
 
@@ -202,7 +202,7 @@ async def test_set_activity_type_rejects_unknown_key(
     )
 
     mock_garmin_client.set_activity_type.assert_not_called()
-    assert "Unknown activity type 'moonwalking'" in result[0][0].text
+    assert "Unknown activity type 'moonwalking'" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -224,7 +224,7 @@ async def test_set_activity_description_tool(
         json={"activityId": 12345678901, "description": "Felt strong. New shoes."},
         api=True,
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["success"] is True
     assert data["description"] == "Felt strong. New shoes."
 
@@ -255,7 +255,7 @@ async def test_set_activity_event_type_tool(
         },
         api=True,
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["event_type"] == "race"
 
 
@@ -274,7 +274,7 @@ async def test_set_activity_event_type_rejects_unknown(
     )
 
     mock_garmin_client.client.put.assert_not_called()
-    assert "Unknown event type 'wedding'" in result[0][0].text
+    assert "Unknown event type 'wedding'" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -300,7 +300,7 @@ async def test_set_perceived_effort_tool(
         },
         api=True,
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["rpe"] == 7
 
 
@@ -315,7 +315,7 @@ async def test_set_perceived_effort_rejects_out_of_range(
     )
 
     mock_garmin_client.client.put.assert_not_called()
-    assert result[0][0].text == "rpe must be between 0 and 10"
+    assert result.content[0].text == "rpe must be between 0 and 10"
 
 
 @pytest.mark.asyncio
@@ -338,7 +338,7 @@ async def test_set_activity_feel_tool(app_with_activity_management, mock_garmin_
         },
         api=True,
     )
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["feel"] == 75
 
 
@@ -353,7 +353,7 @@ async def test_set_activity_feel_rejects_invalid_value(
     )
 
     mock_garmin_client.client.put.assert_not_called()
-    assert result[0][0].text == "feel must be one of 0, 25, 50, 75, 100"
+    assert result.content[0].text == "feel must be one of 0, 25, 50, 75, 100"
 
 
 @pytest.mark.asyncio
@@ -390,7 +390,7 @@ async def test_get_activity_splits_elevation_fields(app_with_activity_management
     )
 
     # Parse and verify elevation fields
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "laps" in data
     assert len(data["laps"]) == 2
 
@@ -415,7 +415,7 @@ async def test_get_activity_splits_includes_swim_lengths(app_with_activity_manag
         {"activity_id": 22526515067}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["activity_id"] == 22526515067
     assert data["lap_count"] == 1
     assert data["laps"][0]["avg_swim_cadence"] == 22.0
@@ -499,7 +499,7 @@ async def test_get_activity_weather_metric_converts_to_celsius(
     result = await app_with_activity_management.call_tool(
         "get_activity_weather", {"activity_id": 23651251274}
     )
-    data = json_module.loads(result[0][0].text)
+    data = json_module.loads(result.content[0].text)
     assert data["temperature_unit"] == "C"
     assert data["temperature"] == 13.9   # 57 F -> 13.9 C, not the raw 57
     assert data["apparent_temperature"] == 13.9
@@ -524,7 +524,7 @@ async def test_get_activity_weather_statute_us_keeps_fahrenheit(
     result = await app_with_activity_management.call_tool(
         "get_activity_weather", {"activity_id": 1}
     )
-    data = json_module.loads(result[0][0].text)
+    data = json_module.loads(result.content[0].text)
     assert data["temperature_unit"] == "F"
     assert data["temperature"] == 57      # unchanged
     assert data["dew_point"] == 50
@@ -672,7 +672,7 @@ async def test_get_activities_includes_event_type(app_with_activity_management, 
         {"start": 0, "limit": 20}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["activities"][0]["event_type"] == "race"
     assert data["activities"][1]["event_type"] == "training"
 
@@ -687,7 +687,7 @@ async def test_get_activities_by_date_includes_event_type(app_with_activity_mana
         {"start_date": "2024-01-08", "end_date": "2024-01-15"}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["activities"][0]["event_type"] == "race"
     assert data["activities"][1]["event_type"] == "training"
 
@@ -709,7 +709,7 @@ async def test_get_activities_omits_event_type_when_absent(app_with_activity_man
         {"start": 0, "limit": 20}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert "event_type" not in data["activities"][0]
 
 
@@ -723,7 +723,7 @@ async def test_get_activity_includes_event_type(app_with_activity_management, mo
         {"activity_id": 12345678901}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["event_type"] == "race"
 
 
@@ -742,7 +742,7 @@ async def test_get_activity_includes_description(app_with_activity_management, m
         {"activity_id": 12345678901}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["description"] == "Felt strong throughout. New shoes."
 
 
@@ -769,7 +769,7 @@ async def test_get_activity_event_type_uses_event_type_dto(
         {"activity_id": 1}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["event_type"] == "race"
 
 
@@ -785,7 +785,7 @@ async def test_get_activities_by_date_no_data(app_with_activity_management, mock
     )
 
     assert result is not None
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["count"] == 0
     assert data["has_more"] is False
     assert data["activities"] == []
@@ -836,7 +836,7 @@ async def test_set_activity_name_exception(app_with_activity_management, mock_ga
     )
 
     assert result is not None
-    assert result[0][0].text == "Error updating activity name: API Error"
+    assert result.content[0].text == "Error updating activity name: API Error"
 
 
 # ── Pagination tests ──────────────────────────────────────────────────────────
@@ -853,7 +853,7 @@ async def test_get_activities_by_date_pagination_metadata_first_page(
         {"start_date": "2024-01-01", "end_date": "2024-01-31"}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["page"] == 0
     assert data["page_size"] == 100
     assert data["count"] == len(MOCK_ACTIVITIES)
@@ -877,7 +877,7 @@ async def test_get_activities_by_date_has_more_when_full_page(
         {"start_date": "2024-01-01", "end_date": "2024-12-31", "page_size": page_size}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["has_more"] is True
     assert data["next_page"] == 1
     assert data["count"] == page_size
@@ -895,7 +895,7 @@ async def test_get_activities_by_date_no_more_on_partial_page(
         {"start_date": "2024-01-01", "end_date": "2024-01-31"}
     )
 
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["has_more"] is False
     assert "next_page" not in data
 
@@ -973,7 +973,7 @@ async def test_create_manual_activity_success(app_with_activity_management, mock
     )
 
     assert result is not None
-    data = json.loads(result[0][0].text)
+    data = json.loads(result.content[0].text)
     assert data["success"] is True
     assert data["activity"] == {"activityId": 999}
 
@@ -1040,7 +1040,7 @@ async def test_create_manual_activity_rejects_zero_duration(
         "create_manual_activity",
         {"type_key": "yoga", "date": "2024-03-01", "duration_minutes": 0},
     )
-    assert "Error" in result[0][0].text
+    assert "Error" in result.content[0].text
     mock_garmin_client.create_manual_activity.assert_not_called()
 
 
@@ -1053,7 +1053,7 @@ async def test_create_manual_activity_rejects_empty_type_key(
         "create_manual_activity",
         {"type_key": "  ", "date": "2024-03-01", "duration_minutes": 30},
     )
-    assert "Error" in result[0][0].text
+    assert "Error" in result.content[0].text
     mock_garmin_client.create_manual_activity.assert_not_called()
 
 
@@ -1066,5 +1066,5 @@ async def test_create_manual_activity_exception(app_with_activity_management, mo
         "create_manual_activity",
         {"type_key": "yoga", "date": "2024-03-01", "duration_minutes": 60},
     )
-    assert "Error" in result[0][0].text
-    assert "Garmin API error" in result[0][0].text
+    assert "Error" in result.content[0].text
+    assert "Garmin API error" in result.content[0].text

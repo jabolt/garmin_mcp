@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import garmin_mcp
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 
 def test_main_registers_tools_and_starts_stdio(monkeypatch):
@@ -29,7 +29,7 @@ def test_main_registers_tools_and_starts_stdio(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(FastMCP, "run", capture_run)
+    monkeypatch.setattr(MCPServer, "run", capture_run)
 
     garmin_mcp.main()
 
@@ -46,7 +46,7 @@ def test_main_rejects_malformed_allowlist_before_garmin_initialization(
     init_api = Mock()
     monkeypatch.setenv("GARMIN_ENABLED_TOOLS", ",,  ,")
     monkeypatch.setattr(garmin_mcp, "init_api", init_api)
-    monkeypatch.setattr(FastMCP, "run", lambda _self, **_kwargs: None)
+    monkeypatch.setattr(MCPServer, "run", lambda _self, **_kwargs: None)
 
     with pytest.raises(SystemExit) as exc_info:
         garmin_mcp.main()
@@ -87,7 +87,7 @@ def test_main_starts_server_before_garmin_login_completes(monkeypatch):
     def capture_run(self, **kwargs):
         reached_run.set()
 
-    monkeypatch.setattr(FastMCP, "run", capture_run)
+    monkeypatch.setattr(MCPServer, "run", capture_run)
 
     try:
         garmin_mcp.main()

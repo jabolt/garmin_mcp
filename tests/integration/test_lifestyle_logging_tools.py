@@ -15,7 +15,7 @@ import re
 
 import pytest
 from garminconnect import GarminConnectConnectionError
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from garmin_mcp import lifestyle_logging, nutrition
 
@@ -120,12 +120,12 @@ def service(mock_garmin_client, monkeypatch):
 
 @pytest.fixture
 def app(service):
-    return lifestyle_logging.register_tools(FastMCP("Test Lifestyle"))
+    return lifestyle_logging.register_tools(MCPServer("Test Lifestyle"))
 
 
 async def _call(app, tool, args):
     result = await app.call_tool(tool, args)
-    return result[0][0].text
+    return result.content[0].text
 
 
 # --- registration -------------------------------------------------------------
@@ -369,7 +369,7 @@ async def test_delete_refuses_built_in_behaviours(app, service):
 @pytest.mark.asyncio
 async def test_food_logging_tools_point_at_lifestyle_logging(mock_garmin_client):
     nutrition.configure(mock_garmin_client)
-    tools = {t.name: t.description for t in await nutrition.register_tools(FastMCP("n")).list_tools()}
+    tools = {t.name: t.description for t in await nutrition.register_tools(MCPServer("n")).list_tools()}
     for name in ("upsert_and_log", "log_custom_food"):
         assert "log_lifestyle_behaviour" in tools[name], name
 

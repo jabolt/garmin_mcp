@@ -4,7 +4,7 @@ Integration tests for high-level workout builder tools (workout_builders.py).
 import json
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from unittest.mock import MagicMock
 
 from garmin_mcp import workouts, workout_builders
@@ -12,7 +12,7 @@ from garmin_mcp import workouts, workout_builders
 
 @pytest.fixture
 def app_with_builders(mock_garmin_client):
-    """FastMCP app with workout_builders registered.
+    """MCPServer app with workout_builders registered.
 
     Also configures `workouts` because workout_builders.schedule_week reuses
     the `_is_already_scheduled` helper defined there, which reads from the
@@ -25,7 +25,7 @@ def app_with_builders(mock_garmin_client):
     }
     workouts.configure(mock_garmin_client)
     workout_builders.configure(mock_garmin_client)
-    app = FastMCP("Test Workout Builders")
+    app = MCPServer("Test Workout Builders")
     app = workout_builders.register_tools(app)
     return app
 
@@ -50,7 +50,7 @@ async def test_schedule_week_uses_client_post_not_garth(
     )
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["status"] == "complete"
     assert payload["scheduled"][0]["status"] == "scheduled"
     assert payload["scheduled"][0]["workout_id"] == 1234567890
@@ -84,7 +84,7 @@ async def test_schedule_week_is_idempotent(
     )
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["status"] == "complete"
     assert payload["scheduled"][0]["status"] == "already_scheduled"
     assert payload["scheduled"][0]["idempotent"] is True
@@ -132,7 +132,7 @@ async def test_schedule_week_partial_idempotency(
         },
     )
 
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     scheduled = payload["scheduled"]
     assert scheduled[0]["status"] == "already_scheduled"
     assert scheduled[1]["status"] == "scheduled"
@@ -160,7 +160,7 @@ async def test_create_run_workout_success(app_with_builders, mock_garmin_client)
     )
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["status"] == "success"
     assert payload["workout_id"] == 9876543210
     mock_garmin_client.upload_workout.assert_called_once()
@@ -187,7 +187,7 @@ async def test_create_run_workout_custom_hr_range(app_with_builders, mock_garmin
     )
 
     assert result is not None
-    payload = json.loads(result[0][0].text)
+    payload = json.loads(result.content[0].text)
     assert payload["status"] == "success"
 
     uploaded_json = mock_garmin_client.upload_workout.call_args[0][0]
@@ -214,5 +214,5 @@ async def test_create_run_workout_exception(app_with_builders, mock_garmin_clien
     )
 
     assert result is not None
-    assert "Error" in result[0][0].text
-    assert "Upload failed" in result[0][0].text
+    assert "Error" in result.content[0].text
+    assert "Upload failed" in result.content[0].text
