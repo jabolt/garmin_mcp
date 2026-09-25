@@ -12,6 +12,7 @@ import os
 import pathlib
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 # The garmin_client will be set by the main file
 garmin_client = None
@@ -329,6 +330,71 @@ def register_tools(app):
             return json.dumps(result, indent=2)
         except Exception as e:
             return f"Error downloading course GPX: {str(e)}"
+
+    @app.tool()
+    async def get_course_location_share(
+        course_id: int,
+        point: str = "start",
+        name: Optional[str] = None,
+    ) -> str:
+        """Prepare a course's start or finish to save as a Saved Location on the user's Garmin watch.
+
+        Use this when the user asks to save, send or add a course's start or
+        finish (end) to their watch or saved locations. Garmin has no API for
+        saved locations, so the location is saved from the user's iPhone: give
+        them the name, the coordinates to paste into Apple Maps and the
+        how_to_save steps from the response.
+
+        Args:
+            course_id: ID of the course (from get_courses).
+            point: "start" or "finish" ("end" also means finish). Defaults to start.
+            name: Name for the saved location. Defaults to "<course name> start"
+                or "<course name> finish".
+        """
+        which = str(point).strip().lower()
+        which = "finish" if which == "end" else which
+        if which not in ("start", "finish"):
+            return f"Error: point must be 'start' or 'finish' (or 'end'), got '{point}'."
+        try:
+            data = garmin_client.client.connectapi(f"/course-service/course/{course_id}")
+            if not isinstance(data, dict):
+                return json.dumps(data, indent=2)
+
+            geo_points = _as_list(data.get("geoPoints"))
+            if which == "start":
+                location = _course_point(geo_points[0] if geo_points else data.get("startPoint"))
+            else:
+                location = _course_point(geo_points[-1]) if geo_points else None
+            if location is None:
+                return f"Error: course {course_id} has no {which} position (no track points)."
+
+            course_name = data.get("courseName") or f"Course {course_id}"
+            label = name or f"{course_name} {which}"
+            lat, lon = location["lat"], location["lon"]
+            return json.dumps(
+                {
+                    "course_id": data.get("courseId", course_id),
+                    "course_name": course_name,
+                    "point": which,
+                    "name": label,
+                    "lat": lat,
+                    "lon": lon,
+                    "elevation_m": location["elevation_m"],
+                    "coordinates": f"{lat}, {lon}",
+                    "apple_maps_url": f"maps://?ll={lat},{lon}&q={quote(label)}",
+                    "how_to_save": [
+                        "Keep the watch connected to the iPhone over Bluetooth.",
+                        f"Open the Maps app and paste {lat}, {lon} into the search bar "
+                        "(or tap apple_maps_url on the iPhone; a web link opens a browser that can't share to Garmin Connect).",
+                        "Tap the pin, then Share > Garmin Connect, and choose the watch if asked.",
+                        f"It appears in the watch's Saved app; rename it to \"{label}\" there if it "
+                        "arrives named by its coordinates or address.",
+                    ],
+                },
+                indent=2,
+            )
+        except Exception as e:
+            return f"Error getting course location: {str(e)}"
 
     @app.tool()
     async def upload_course(

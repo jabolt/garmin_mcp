@@ -500,3 +500,101 @@ def test_resolve_gpx_output_path(monkeypatch):
     # 4. GARMIN_FIT_DOWNLOAD_DIR
     monkeypatch.setenv("GARMIN_FIT_DOWNLOAD_DIR", "/tmp/gpx")
     assert _resolve_gpx_output_path(123) == "/tmp/gpx/123.gpx"
+
+
+# --- get_course_location_share ------------------------------------------
+
+@pytest.mark.asyncio
+async def test_course_location_share_start(app_with_courses, mock_garmin_client):
+    """The start comes back ready to save on the watch via Apple Maps."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001}
+    )
+
+    data = json.loads(_result_text(result))
+    assert data["course_id"] == 700000001
+    assert data["course_name"] == "Riverside 5K"
+    assert data["point"] == "start"
+    assert data["name"] == "Riverside 5K start"
+    assert data["lat"] == 51.5
+    assert data["lon"] == -0.1
+    assert data["elevation_m"] == 20.5
+    assert data["coordinates"] == "51.5, -0.1"
+    assert data["apple_maps_url"] == "maps://?ll=51.5,-0.1&q=Riverside%205K%20start"
+    assert data["how_to_save"]
+    mock_garmin_client.client.connectapi.assert_called_once_with(
+        "/course-service/course/700000001"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("point", ["finish", "end", "Finish"])
+async def test_course_location_share_finish(app_with_courses, mock_garmin_client, point):
+    """finish (or end) is the last track point."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001, "point": point}
+    )
+
+    data = json.loads(_result_text(result))
+    assert data["point"] == "finish"
+    assert data["name"] == "Riverside 5K finish"
+    assert data["coordinates"] == "51.501, -0.1"
+    assert data["elevation_m"] == 21.25
+
+
+@pytest.mark.asyncio
+async def test_course_location_share_custom_name(app_with_courses, mock_garmin_client):
+    """A given name is used and URL-encoded in the link."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool(
+        "get_course_location_share",
+        {"course_id": 700000001, "name": "Car park & café"},
+    )
+
+    data = json.loads(_result_text(result))
+    assert data["name"] == "Car park & café"
+    assert data["apple_maps_url"] == "maps://?ll=51.5,-0.1&q=Car%20park%20%26%20caf%C3%A9"
+
+
+@pytest.mark.asyncio
+async def test_course_location_share_rejects_unknown_point(app_with_courses, mock_garmin_client):
+    """Anything other than start/finish/end is refused before calling Garmin."""
+    result = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001, "point": "middle"}
+    )
+
+    assert "point must be" in _result_text(result)
+    mock_garmin_client.client.connectapi.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_course_location_share_without_track(app_with_courses, mock_garmin_client):
+    """No track points: the start falls back to startPoint, the finish is an error."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL_NO_GEOMETRY
+
+    start = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001}
+    )
+    finish = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 700000001, "point": "finish"}
+    )
+
+    assert json.loads(_result_text(start))["coordinates"] == "51.5, -0.1"
+    assert "no finish" in _result_text(finish)
+
+
+@pytest.mark.asyncio
+async def test_course_location_share_error_is_caught(app_with_courses, mock_garmin_client):
+    """A Garmin error is surfaced as a clean message."""
+    mock_garmin_client.client.connectapi.side_effect = Exception("API Error 404")
+
+    result = await app_with_courses.call_tool(
+        "get_course_location_share", {"course_id": 404}
+    )
+
+    assert "Error getting course location: API Error 404" in _result_text(result)
