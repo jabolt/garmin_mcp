@@ -1043,3 +1043,140 @@ MOCK_RUNNING_TOLERANCE_WEEKLY = [
         "weekIndex": 1901,
     },
 ]
+
+# Courses
+# Shape of GET /course-service/course/{id}, checked against 26 real courses on
+# 2026-09-25 (values here are synthetic). Garmin sends "coursePoints": null, not
+# [], when a course has no waypoints (24 of the 26). The detail payload has no
+# activityType object, only activityTypePk, and uses distanceMeter /
+# elevationGainMeter where the course list uses distanceInMeters.
+_COURSE_GEO_POINTS = [
+    {"latitude": 51.5, "longitude": -0.1, "elevation": 20.5, "distance": 0.0,
+     "timestamp": 1790286999000},
+    {"latitude": 51.5005, "longitude": -0.1, "elevation": 22.0, "distance": 55.6,
+     "timestamp": 1790287010000},
+    {"latitude": 51.501, "longitude": -0.1, "elevation": 21.25, "distance": 111.2,
+     "timestamp": 1790287020000},
+]
+
+MOCK_COURSE_DETAIL = {
+    "courseId": 700000001,
+    "courseName": "Riverside 5K",
+    "description": None,
+    "openStreetMap": False,
+    "matchedToSegments": False,
+    "userProfilePk": 12345678,
+    "userGroupPk": None,
+    "rulePK": 2,
+    "firstName": "Test",
+    "lastName": "User",
+    "displayName": "test-user",
+    "geoRoutePk": 300000001,
+    "sourceTypeId": 3,
+    "sourcePk": None,
+    "distanceMeter": 5132.19,
+    "elevationGainMeter": 65.58,
+    "elevationLossMeter": 60.1,
+    "startPoint": dict(_COURSE_GEO_POINTS[0]),
+    "coursePoints": None,
+    "boundingBox": {
+        "center": None,
+        "lowerLeft": {"latitude": 51.5, "longitude": -0.1},
+        "upperRight": {"latitude": 51.501, "longitude": -0.1},
+        "lowerLeftLatIsSet": True,
+        "lowerLeftLongIsSet": True,
+        "upperRightLatIsSet": True,
+        "upperRightLongIsSet": True,
+    },
+    "hasShareableEvent": False,
+    "hasTurnDetectionDisabled": False,
+    "activityTypePk": 1,
+    "virtualPartnerId": 700000001,
+    "includeLaps": False,
+    "elapsedSeconds": None,
+    "speedMeterPerSecond": None,
+    "createDate": "2026-09-24T21:56:39.0",
+    "updateDate": "2026-09-24T21:56:39.0",
+    "courseLines": [],
+    "coordinateSystem": "WGS84",
+    "targetCoordinateSystem": "WGS84",
+    "originalCoordinateSystem": "WGS84",
+    "consumer": "00000000-0000-0000-0000-000000000000",
+    "elevationSource": 1,
+    "hasPaceBand": False,
+    "hasPowerGuide": False,
+    "favorite": False,
+    "startNote": None,
+    "finishNote": None,
+    "cutoffDuration": None,
+    "geoPoints": [dict(p) for p in _COURSE_GEO_POINTS],
+}
+
+# A course with waypoints: the waypoint type is "coursePointType".
+MOCK_COURSE_DETAIL_WITH_WAYPOINTS = {
+    **MOCK_COURSE_DETAIL,
+    "coursePoints": [
+        {
+            "coursePointId": 480000001,
+            "name": "Water",
+            "coursePk": 700000001,
+            "coursePointType": "WATER",
+            "lon": -0.1,
+            "lat": 51.5005,
+            "distance": 55.6,
+            "elevation": 0.0,
+            "derivedElevation": 22.0,
+            "timestamp": 0,
+            "createdDate": "2026-09-24T00:00:00.0",
+            "modifiedDate": "2026-09-24T00:00:00.0",
+            "uuid": None,
+            "note": None,
+            "cutoffDuration": None,
+            "restDuration": None,
+        }
+    ],
+}
+
+# The collections at their worst: coursePoints missing entirely, geoPoints and
+# courseLines null. Only startPoint is left to locate the course.
+MOCK_COURSE_DETAIL_NO_GEOMETRY = {
+    **{k: v for k, v in MOCK_COURSE_DETAIL.items() if k != "coursePoints"},
+    "geoPoints": None,
+    "courseLines": None,
+}
+
+# Garmin's own export, GET /course-service/course/gpx/{id} (format as served).
+MOCK_COURSE_GPX = b"""<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="Garmin Connect" version="1.1"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/11.xsd"
+  xmlns:ns3="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns2="http://www.garmin.com/xmlschemas/GpxExtensions/v3">
+  <metadata>
+    <name>Riverside 5K</name>
+    <link href="connect.garmin.com">
+      <text>Garmin Connect</text>
+    </link>
+    <time>2026-09-24T21:56:39.000Z</time>
+  </metadata>
+  <wpt lat="51.5005" lon="-0.1">
+    <ele>0.0</ele>
+    <name>Water</name>
+    <type>WATER</type>
+  </wpt>
+  <trk>
+    <name>Riverside 5K</name>
+    <trkseg>
+      <trkpt lat="51.5" lon="-0.1">
+        <ele>20.5</ele>
+      </trkpt>
+      <trkpt lat="51.5005" lon="-0.1">
+        <ele>22.0</ele>
+      </trkpt>
+      <trkpt lat="51.501" lon="-0.1">
+        <ele>21.25</ele>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+"""

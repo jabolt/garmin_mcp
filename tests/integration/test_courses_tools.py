@@ -12,6 +12,12 @@ from mcp.server.fastmcp import FastMCP
 
 from garmin_mcp import courses
 from garmin_mcp.courses import _build_course_payload, _haversine, _resolve_gpx_output_path
+from tests.fixtures.garmin_responses import (
+    MOCK_COURSE_DETAIL,
+    MOCK_COURSE_DETAIL_NO_GEOMETRY,
+    MOCK_COURSE_DETAIL_WITH_WAYPOINTS,
+    MOCK_COURSE_GPX,
+)
 
 
 @pytest.fixture
@@ -83,40 +89,82 @@ async def test_get_courses_error_is_caught(app_with_courses, mock_garmin_client)
 # --- get_course_details ---------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_course_details_success(app_with_courses, mock_garmin_client):
-    """get_course_details returns full course structure with custom waypoints."""
-    mock_garmin_client.client.connectapi.return_value = {
-        "courseId": 777,
-        "courseName": "Bikepack Day 1",
-        "distanceInMeters": 45000.0,
-        "elevationGainInMeters": 350.0,
-        "elevationLossInMeters": 300.0,
-        "activityType": {"typeKey": "gravel_cycling"},
-        "coursePoints": [
-            {
-                "name": "Water Fountain",
-                "pointType": "WATER",
-                "lat": 52.2,
-                "lon": 21.0,
-                "distance": 12000.0,
-            }
-        ],
-        "geoPoints": [
-            {"latitude": 52.1, "longitude": 20.9},
-            {"latitude": 52.2, "longitude": 21.0},
-        ],
-    }
+async def test_get_course_details_null_course_points(app_with_courses, mock_garmin_client):
+    """Garmin's real shape (coursePoints: null) no longer crashes: no waypoints."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
 
-    result = await app_with_courses.call_tool("get_course_details", {"course_id": 777})
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
+
+    text = _result_text(result)
+    assert not text.startswith("Error"), text
+    data = json.loads(text)
+    assert data["waypoints_count"] == 0
+    assert data["waypoints"] == []
+    assert data["geo_points_count"] == 3
+    mock_garmin_client.client.connectapi.assert_called_once_with(
+        "/course-service/course/700000001"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_course_details_start_and_finish(app_with_courses, mock_garmin_client):
+    """Start and finish are the first and last track points, plus the gap between them."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
 
     data = json.loads(_result_text(result))
-    assert data["course_id"] == 777
-    assert data["name"] == "Bikepack Day 1"
-    assert data["distance_m"] == 45000.0
+    assert data["start"] == {"lat": 51.5, "lon": -0.1, "elevation_m": 20.5}
+    assert data["finish"] == {"lat": 51.501, "lon": -0.1, "elevation_m": 21.25}
+    # 0.001 degrees of latitude on a 6371 km sphere.
+    assert data["start_finish_gap_m"] == 111.2
+
+
+@pytest.mark.asyncio
+async def test_get_course_details_metadata(app_with_courses, mock_garmin_client):
+    """Distance, elevation and activity type come from the detail payload's own keys."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL
+
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
+    assert data["course_id"] == 700000001
+    assert data["name"] == "Riverside 5K"
+    assert data["distance_m"] == 5132.19
+    assert data["elevation_gain_m"] == 65.58
+    assert data["elevation_loss_m"] == 60.1
+    assert data["activity_type_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_course_details_waypoints(app_with_courses, mock_garmin_client):
+    """Waypoints are listed with their coursePointType."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL_WITH_WAYPOINTS
+
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
     assert data["waypoints_count"] == 1
-    assert data["waypoints"][0]["type"] == "WATER"
-    assert data["geo_points_count"] == 2
-    mock_garmin_client.client.connectapi.assert_called_once_with("/course-service/course/777")
+    assert data["waypoints"] == [
+        {"name": "Water", "type": "WATER", "lat": 51.5005, "lon": -0.1, "distance_m": 55.6}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_course_details_without_geometry(app_with_courses, mock_garmin_client):
+    """Missing coursePoints and null geoPoints: start falls back to startPoint, no finish."""
+    mock_garmin_client.client.connectapi.return_value = MOCK_COURSE_DETAIL_NO_GEOMETRY
+
+    result = await app_with_courses.call_tool("get_course_details", {"course_id": 700000001})
+
+    text = _result_text(result)
+    assert not text.startswith("Error"), text
+    data = json.loads(text)
+    assert data["start"] == {"lat": 51.5, "lon": -0.1, "elevation_m": 20.5}
+    assert data["finish"] is None
+    assert data["start_finish_gap_m"] is None
+    assert data["geo_points_count"] == 0
+    assert data["waypoints"] == []
 
 
 @pytest.mark.asyncio
@@ -131,51 +179,115 @@ async def test_get_course_details_error_is_caught(app_with_courses, mock_garmin_
 
 # --- download_course_gpx ---------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_download_course_gpx_success(app_with_courses, mock_garmin_client, tmp_path):
-    """download_course_gpx formats a valid GPX 1.1 file and writes to disk."""
-    mock_garmin_client.client.connectapi.return_value = {
-        "courseId": 888,
-        "courseName": "Mountain Pass",
-        "geoPoints": [
-            {"latitude": 46.1, "longitude": 8.1, "elevation": 1200.0},
-            {"latitude": 46.2, "longitude": 8.2, "elevation": 1400.0},
-        ],
-        "coursePoints": [
-            {"name": "Summit Rest", "pointType": "SUMMIT", "lat": 46.2, "lon": 8.2}
-        ],
-    }
+@pytest.fixture
+def no_download_dir(monkeypatch, tmp_path):
+    """No download directory configured; the server runs in an empty directory."""
+    monkeypatch.delenv("GARMIN_FIT_DOWNLOAD_DIR", raising=False)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    return cwd
 
-    out_file = str(tmp_path / "mountain_pass.gpx")
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_returns_official_gpx(
+    app_with_courses, mock_garmin_client, no_download_dir
+):
+    """Garmin's own export is returned in the response; nothing is written to disk."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+
+    result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
+    assert data["status"] == "success"
+    assert data["course_id"] == 700000001
+    assert data["name"] == "Riverside 5K"
+    assert data["track_points_count"] == 3
+    assert data["waypoints_count"] == 1
+    assert data["size_bytes"] == len(MOCK_COURSE_GPX)
+    assert data["gpx_path"] is None
+    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+    mock_garmin_client.client.download.assert_called_once_with(
+        "/course-service/course/gpx/700000001"
+    )
+    assert list(no_download_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_writes_output_path(
+    app_with_courses, mock_garmin_client, tmp_path
+):
+    """An explicit output_path gets Garmin's bytes unchanged, and the content is still returned."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+    out_file = tmp_path / "riverside.gpx"
+
     result = await app_with_courses.call_tool(
-        "download_course_gpx", {"course_id": 888, "output_path": out_file}
+        "download_course_gpx", {"course_id": 700000001, "output_path": str(out_file)}
+    )
+
+    data = json.loads(_result_text(result))
+    assert data["gpx_path"] == str(out_file)
+    assert out_file.read_bytes() == MOCK_COURSE_GPX
+    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_env_dir(
+    app_with_courses, mock_garmin_client, tmp_path, monkeypatch
+):
+    """With GARMIN_FIT_DOWNLOAD_DIR set, the file is saved there as {course_id}.gpx."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+    monkeypatch.setenv("GARMIN_FIT_DOWNLOAD_DIR", str(tmp_path / "gpx"))
+
+    result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 700000001})
+
+    data = json.loads(_result_text(result))
+    expected = tmp_path / "gpx" / "700000001.gpx"
+    assert data["gpx_path"] == str(expected)
+    assert expected.read_bytes() == MOCK_COURSE_GPX
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_unwritable_path_still_returns_gpx(
+    app_with_courses, mock_garmin_client, tmp_path
+):
+    """A path that can't be written (as on a read-only host) doesn't lose the GPX."""
+    mock_garmin_client.client.download.return_value = MOCK_COURSE_GPX
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+
+    result = await app_with_courses.call_tool(
+        "download_course_gpx",
+        {"course_id": 700000001, "output_path": str(blocker / "course.gpx")},
     )
 
     data = json.loads(_result_text(result))
     assert data["status"] == "success"
-    assert data["course_id"] == 888
-    assert data["waypoints_count"] == 1
-    assert data["track_points_count"] == 2
-    assert os.path.isfile(out_file)
-
-    with open(out_file, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    assert "<gpx version='1.1'" in content
-    assert "<name>Mountain Pass</name>" in content
-    assert "<wpt lat='46.2' lon='8.2'>" in content
-    assert "<name>Summit Rest</name>" in content
-    assert "<trkpt lat='46.1' lon='8.1'><ele>1200.0</ele></trkpt>" in content
+    assert data["gpx_path"] is None
+    assert data["file_error"]
+    assert data["gpx"] == MOCK_COURSE_GPX.decode("utf-8")
 
 
 @pytest.mark.asyncio
-async def test_download_course_gpx_missing_course(app_with_courses, mock_garmin_client):
-    """Missing course surfaces a clean error message."""
-    mock_garmin_client.client.connectapi.return_value = {}
+async def test_download_course_gpx_not_gpx(app_with_courses, mock_garmin_client, no_download_dir):
+    """A body that isn't GPX is reported as an error, not returned as a course."""
+    mock_garmin_client.client.download.return_value = b'{"message": "Not Found"}'
 
     result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 404})
 
-    assert "Error: course 404 not found" in _result_text(result)
+    assert "Error downloading course GPX" in _result_text(result)
+
+
+@pytest.mark.asyncio
+async def test_download_course_gpx_error_is_caught(
+    app_with_courses, mock_garmin_client, no_download_dir
+):
+    """A Garmin error (e.g. unknown course) is surfaced as a clean message."""
+    mock_garmin_client.client.download.side_effect = Exception("API Error 404")
+
+    result = await app_with_courses.call_tool("download_course_gpx", {"course_id": 404})
+
+    assert "Error downloading course GPX: API Error 404" in _result_text(result)
 
 
 # --- upload_course --------------------------------------------------------
@@ -321,14 +433,19 @@ def test_build_course_payload_rejects_too_few_points():
         _build_course_payload({}, "X", 1, None)
 
 
-def test_resolve_gpx_output_path():
+def test_resolve_gpx_output_path(monkeypatch):
     """Output path resolution precedence and directory handling."""
+    monkeypatch.delenv("GARMIN_FIT_DOWNLOAD_DIR", raising=False)
+
     # 1. Custom file path
     assert _resolve_gpx_output_path(123, "/tmp/custom.gpx") == "/tmp/custom.gpx"
 
     # 2. Custom directory path
     assert _resolve_gpx_output_path(123, "/tmp/dir/") == "/tmp/dir/123.gpx"
 
-    # 3. Default path
-    resolved_default = _resolve_gpx_output_path(123)
-    assert resolved_default.endswith("courses/123.gpx") or "123.gpx" in resolved_default
+    # 3. Nothing configured: no file (the server's working directory may be read-only)
+    assert _resolve_gpx_output_path(123) is None
+
+    # 4. GARMIN_FIT_DOWNLOAD_DIR
+    monkeypatch.setenv("GARMIN_FIT_DOWNLOAD_DIR", "/tmp/gpx")
+    assert _resolve_gpx_output_path(123) == "/tmp/gpx/123.gpx"
